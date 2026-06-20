@@ -8,6 +8,13 @@ This project is experimental. The current packaged `qemu_libretro.dll` can load
 and run QEMU in UWP, but its Win32 file block backend is not reliable inside the
 UWP app container.
 
+## Screenshots
+
+<p>
+  <img src="IMG1.png" alt="Qemu-Libretro-UWP boot configuration screen" width="420">
+  <img src="IMG2.png" alt="Qemu-Libretro-UWP running QEMU through libretro" width="420">
+</p>
+
 ## Current Status
 
 Working:
@@ -50,6 +57,11 @@ directory:
 
 - `qemu_libretro.dll`
 - `qemu\**\*`
+
+`qemu_libretro.dll` is stored for GitHub upload as `qemu_libretro-dll.rar`.
+Extract `qemu_libretro-dll.rar` into the project directory before building or
+running the app, so `qemu_libretro.dll` is available next to
+`Qemu-Libretro-UWP.vcxproj`.
 
 ## Requirements
 
@@ -171,3 +183,8 @@ If a command using `file=` hangs, the log usually stops after:
 Host: calling first retro_run.
 Host: watchdog: first retro_run has not returned after 3s.
 ```
+
+## References
+
+- [io12/qemu-libretro](https://github.com/io12/qemu-libretro)
+- [rodrigoandrigo/Bochs-UWP](https://github.com/rodrigoandrigo/Bochs-UWP)
