@@ -1,0 +1,136 @@
+﻿//
+// DirectXPage.xaml.h
+// DirectXPage class declaration.
+//
+
+#pragma once
+
+#include "DirectXPage.g.h"
+
+#include "Common\DeviceResources.h"
+#include "Qemu_Libretro_UWPMain.h"
+
+#include <string>
+#include <cstdint>
+
+namespace Qemu_Libretro_UWP
+{
+	/// <summary>
+	/// A page that hosts a DirectX SwapChainPanel.
+	/// </summary>
+	public ref class DirectXPage sealed
+	{
+	public:
+		DirectXPage();
+		virtual ~DirectXPage();
+
+		void SaveInternalState(Windows::Foundation::Collections::IPropertySet^ state);
+		void LoadInternalState(Windows::Foundation::Collections::IPropertySet^ state);
+
+	private:
+		// Low-level XAML rendering event handler.
+		void OnRendering(Platform::Object^ sender, Platform::Object^ args);
+
+		// Window event handlers.
+		void OnVisibilityChanged(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::VisibilityChangedEventArgs^ args);
+
+		// DisplayInformation event handlers.
+		void OnDpiChanged(Windows::Graphics::Display::DisplayInformation^ sender, Platform::Object^ args);
+		void OnOrientationChanged(Windows::Graphics::Display::DisplayInformation^ sender, Platform::Object^ args);
+		void OnDisplayContentsInvalidated(Windows::Graphics::Display::DisplayInformation^ sender, Platform::Object^ args);
+
+		// Other event handlers.
+		void SelectBootButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void SelectDriveButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void SelectCdromButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void StartButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void ResetButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void ShowTabsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void DetectTargetsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void UpdateCommandLineButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void ArgumentsHelpButton_PointerEntered(Platform::Object^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs^ e);
+		void ArgumentsHelpButton_PointerExited(Platform::Object^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs^ e);
+		void ArgumentsHelpHideTimer_Tick(Platform::Object^ sender, Platform::Object^ e);
+		void BootOption_Changed(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void BootOptionText_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::TextChangedEventArgs^ e);
+		void Architecture_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
+		void DiagnosticProfile_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
+		void MemorySlider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
+		void OnKeyDown(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
+		void OnKeyUp(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
+		void OnCompositionScaleChanged(Windows::UI::Xaml::Controls::SwapChainPanel^ sender, Object^ args);
+		void OnSwapChainPanelSizeChanged(Platform::Object^ sender, Windows::UI::Xaml::SizeChangedEventArgs^ e);
+		void SetStatus(const std::wstring& text);
+		void AppendError(const std::wstring& text);
+		void ToggleInputCapture();
+		void UpdateCaptureIndicators();
+		void FocusEmulatorSurface();
+		void SendPointerToCore(Windows::UI::Core::PointerEventArgs^ e);
+		void RefreshCommandLinePreview();
+		Platform::String^ BuildCommandLine();
+		bool EnsureMediaNbdServer(Windows::Storage::StorageFile^ mediaFile, bool readOnly, bool cdromMedia, std::wstring& url);
+		void StopMediaNbdServer(bool cdromMedia);
+		void StopAllMediaNbdServers();
+		void OnMediaNbdConnectionReceived(Windows::Networking::Sockets::StreamSocketListener^ sender, Windows::Networking::Sockets::StreamSocketListenerConnectionReceivedEventArgs^ args);
+		void ServeMediaNbdClient(Windows::Networking::Sockets::StreamSocket^ socket, std::wstring mediaPath, uint64_t mediaSize, bool readOnly);
+		bool IsCommandLineFile(Windows::Storage::StorageFile^ file);
+		Platform::String^ QuoteForCommandLine(Platform::String^ value);
+		void StageBootFileAndStart();
+		void WriteCommandLineAndStart(Platform::String^ commandLine);
+		void StartWithCommandFile(Windows::Storage::StorageFile^ commandFile);
+		void SetStartState(bool starting, bool running);
+		unsigned MapVirtualKeyToRetro(Windows::System::VirtualKey key);
+
+		// Track independent input on a background worker thread.
+		Windows::Foundation::IAsyncAction^ m_inputLoopWorker;
+		Windows::UI::Core::CoreIndependentInputSource^ m_coreInput;
+
+		// Independent input handling functions.
+		void OnPointerPressed(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
+		void OnPointerMoved(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
+		void OnPointerReleased(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
+
+		// Resources used to render DirectX content behind the XAML page.
+		std::shared_ptr<DX::DeviceResources> m_deviceResources;
+		std::unique_ptr<Qemu_Libretro_UWPMain> m_main; 
+		Windows::Storage::StorageFile^ m_selectedBootFile;
+		Windows::Storage::StorageFile^ m_stagedBootFile;
+		Windows::Storage::StorageFile^ m_selectedDriveFile;
+		Windows::Storage::StorageFile^ m_selectedCdromFile;
+		Windows::Storage::StorageFile^ m_selectedCommandFile;
+		Windows::Storage::StorageFile^ m_stagedDriveFile;
+		Windows::Storage::StorageFile^ m_stagedCdromFile;
+		Windows::Storage::StorageFile^ m_stagedCommandFile;
+		Windows::Storage::StorageFile^ m_generatedCommandFile;
+		Windows::Networking::Sockets::StreamSocketListener^ m_driveNbdListener;
+		Windows::Networking::Sockets::StreamSocketListener^ m_cdromNbdListener;
+		std::wstring m_driveNbdPath;
+		std::wstring m_cdromNbdPath;
+		uint64_t m_driveNbdSize;
+		uint64_t m_cdromNbdSize;
+		int m_driveNbdPort;
+		int m_cdromNbdPort;
+		bool m_driveNbdReadOnly;
+		bool m_cdromNbdReadOnly;
+		Windows::UI::Xaml::DispatcherTimer^ m_argumentsHelpHideTimer;
+		bool m_isStarting;
+		bool m_isRunning;
+		bool m_windowVisible;
+		bool m_inputCaptured;
+		bool m_ctrlDown;
+		bool m_altDown;
+		double m_inputSurfaceWidth;
+		double m_inputSurfaceHeight;
+		double m_emulatorPointerX;
+		double m_emulatorPointerY;
+		double m_lastPhysicalPointerX;
+		double m_lastPhysicalPointerY;
+		bool m_havePhysicalPointerPosition;
+	};
+}
+
+
+
+
+
+

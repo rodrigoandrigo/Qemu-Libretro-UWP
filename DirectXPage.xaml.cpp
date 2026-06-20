@@ -1,0 +1,2030 @@
+﻿//
+// DirectXPage.xaml.cpp
+// DirectXPage class implementation.
+//
+
+#include "pch.h"
+#include "DirectXPage.xaml.h"
+#include "LibretroApi.h"
+
+#include <algorithm>
+#include <cstring>
+#include <cstdint>
+#include <cwchar>
+#include <initializer_list>
+#include <ppltasks.h>
+#include <set>
+#include <sstream>
+#include <vector>
+
+using namespace Qemu_Libretro_UWP;
+
+using namespace Platform;
+using namespace Windows::ApplicationModel;
+using namespace Windows::Foundation;
+using namespace Windows::Foundation::Collections;
+using namespace Windows::Graphics::Display;
+using namespace Windows::Networking;
+using namespace Windows::Networking::Sockets;
+using namespace Windows::Storage;
+using namespace Windows::Storage::Pickers;
+using namespace Windows::Storage::Streams;
+using namespace Windows::System;
+using namespace Windows::System::Threading;
+using namespace Windows::UI::Core;
+using namespace Windows::UI::Input;
+using namespace Windows::UI::Xaml;
+using namespace Windows::UI::Xaml::Controls;
+using namespace Windows::UI::Xaml::Controls::Primitives;
+using namespace Windows::UI::Xaml::Data;
+using namespace Windows::UI::Xaml::Input;
+using namespace Windows::UI::Xaml::Media;
+using namespace Windows::UI::Xaml::Navigation;
+using namespace concurrency;
+
+namespace
+{
+	enum class TargetBlockStyle
+	{
+		Ide,
+		Scsi,
+		VirtioMmio,
+		VirtioPci,
+		VirtioCcw
+	};
+
+	struct TargetProfile
+	{
+		int memoryMb;
+		const wchar_t* machineArgs;
+		TargetBlockStyle blockStyle;
+	};
+
+	bool IsAnyTarget(const std::wstring& target, std::initializer_list<const wchar_t*> names)
+	{
+		for (const wchar_t* name : names)
+		{
+			if (_wcsicmp(target.c_str(), name) == 0)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	TargetProfile GetTargetProfile(const std::wstring& target)
+	{
+		if (IsAnyTarget(target, { L"x86_64" }))
+		{
+			return { 1024, L"", TargetBlockStyle::Ide };
+		}
+		if (IsAnyTarget(target, { L"i386" }))
+		{
+			return { 512, L"", TargetBlockStyle::Ide };
+		}
+		if (IsAnyTarget(target, { L"arm" }))
+		{
+			return { 256, L" -M virt", TargetBlockStyle::VirtioMmio };
+		}
+		if (IsAnyTarget(target, { L"aarch64" }))
+		{
+			return { 1024, L" -M virt", TargetBlockStyle::VirtioMmio };
+		}
+		if (IsAnyTarget(target, { L"riscv32" }))
+		{
+			return { 512, L" -M virt", TargetBlockStyle::VirtioMmio };
+		}
+		if (IsAnyTarget(target, { L"riscv64" }))
+		{
+			return { 1024, L" -M virt", TargetBlockStyle::VirtioMmio };
+		}
+		if (IsAnyTarget(target, { L"mips", L"mipsel" }))
+		{
+			return { 256, L" -M malta", TargetBlockStyle::Ide };
+		}
+		if (IsAnyTarget(target, { L"mips64", L"mips64el" }))
+		{
+			return { 512, L" -M malta", TargetBlockStyle::Ide };
+		}
+		if (IsAnyTarget(target, { L"ppc" }))
+		{
+			return { 512, L" -M mac99", TargetBlockStyle::Ide };
+		}
+		if (IsAnyTarget(target, { L"ppc64" }))
+		{
+			return { 1024, L" -M pseries", TargetBlockStyle::VirtioPci };
+		}
+		if (IsAnyTarget(target, { L"s390x" }))
+		{
+			return { 1024, L" -M s390-ccw-virtio", TargetBlockStyle::VirtioCcw };
+		}
+		if (IsAnyTarget(target, { L"sparc" }))
+		{
+			return { 256, L"", TargetBlockStyle::Scsi };
+		}
+		if (IsAnyTarget(target, { L"sparc64" }))
+		{
+			return { 512, L"", TargetBlockStyle::Scsi };
+		}
+		if (IsAnyTarget(target, { L"m68k" }))
+		{
+			return { 128, L" -M q800", TargetBlockStyle::Scsi };
+		}
+		if (IsAnyTarget(target, { L"alpha" }))
+		{
+			return { 256, L"", TargetBlockStyle::Scsi };
+		}
+		return { 512, L"", TargetBlockStyle::Ide };
+	}
+
+	const wchar_t* BlockInterface(TargetBlockStyle style)
+	{
+		return style == TargetBlockStyle::Scsi ? L"scsi" : L"ide";
+	}
+
+	const wchar_t* VirtioDevice(TargetBlockStyle style)
+	{
+		switch (style)
+		{
+		case TargetBlockStyle::VirtioMmio:
+			return L"virtio-blk-device";
+		case TargetBlockStyle::VirtioPci:
+			return L"virtio-blk-pci";
+		case TargetBlockStyle::VirtioCcw:
+			return L"virtio-blk-ccw";
+		default:
+			return L"";
+		}
+	}
+
+	bool IsTargetChar(unsigned char value)
+	{
+		return (value >= 'a' && value <= 'z') ||
+			(value >= 'A' && value <= 'Z') ||
+			(value >= '0' && value <= '9') ||
+			value == '_';
+	}
+
+	bool ContainsTerminatedAscii(
+		const std::vector<unsigned char>& data,
+		const char* token,
+		size_t begin,
+		size_t end)
+	{
+		size_t length = strlen(token);
+		if (length == 0 || begin >= data.size())
+		{
+			return false;
+		}
+
+		end = (std::min)(end, data.size());
+		if (end < begin || end - begin < length)
+		{
+			return false;
+		}
+
+		for (size_t i = begin; i + length <= end; i++)
+		{
+			if (memcmp(data.data() + i, token, length) == 0)
+			{
+				bool beforeOk = i == 0 || data[i - 1] == 0;
+				bool afterOk = i + length >= data.size() || data[i + length] == 0;
+				if (beforeOk && afterOk)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	size_t FindAscii(const std::vector<unsigned char>& data, const char* token)
+	{
+		size_t length = strlen(token);
+		if (length == 0 || data.size() < length)
+		{
+			return std::wstring::npos;
+		}
+
+		for (size_t i = 0; i + length <= data.size(); i++)
+		{
+			if (memcmp(data.data() + i, token, length) == 0)
+			{
+				return i;
+			}
+		}
+
+		return std::wstring::npos;
+	}
+
+	std::wstring WidenAscii(const std::string& value)
+	{
+		return std::wstring(value.begin(), value.end());
+	}
+
+	bool HasExtension(const std::wstring& name, const wchar_t* extension)
+	{
+		size_t extensionLength = wcslen(extension);
+		return name.length() >= extensionLength &&
+			_wcsicmp(name.c_str() + name.length() - extensionLength, extension) == 0;
+	}
+
+	std::wstring DiskFormatFromFileName(const std::wstring& name)
+	{
+		if (HasExtension(name, L".qcow2"))
+		{
+			return L"qcow2";
+		}
+		if (HasExtension(name, L".qcow"))
+		{
+			return L"qcow";
+		}
+		if (HasExtension(name, L".qed"))
+		{
+			return L"qed";
+		}
+		if (HasExtension(name, L".vdi"))
+		{
+			return L"vdi";
+		}
+		if (HasExtension(name, L".vmdk"))
+		{
+			return L"vmdk";
+		}
+		if (HasExtension(name, L".vhd") || HasExtension(name, L".vpc"))
+		{
+			return L"vpc";
+		}
+		if (HasExtension(name, L".vhdx"))
+		{
+			return L"vhdx";
+		}
+		if (HasExtension(name, L".bochs"))
+		{
+			return L"bochs";
+		}
+		if (HasExtension(name, L".cloop"))
+		{
+			return L"cloop";
+		}
+		if (HasExtension(name, L".dmg"))
+		{
+			return L"dmg";
+		}
+		if (HasExtension(name, L".hds") || HasExtension(name, L".parallels"))
+		{
+			return L"parallels";
+		}
+		return L"raw";
+	}
+
+	bool IsCoreKeyDown(VirtualKey key)
+	{
+		CoreVirtualKeyStates state = Window::Current->CoreWindow->GetKeyState(key);
+		return (static_cast<unsigned>(state) & static_cast<unsigned>(CoreVirtualKeyStates::Down)) != 0;
+	}
+
+	bool IsControlDown()
+	{
+		return IsCoreKeyDown(VirtualKey::Control) ||
+			IsCoreKeyDown(VirtualKey::LeftControl) ||
+			IsCoreKeyDown(VirtualKey::RightControl);
+	}
+
+	bool IsAltDown()
+	{
+		return IsCoreKeyDown(VirtualKey::Menu) ||
+			IsCoreKeyDown(VirtualKey::LeftMenu) ||
+			IsCoreKeyDown(VirtualKey::RightMenu);
+	}
+
+	std::wstring JoinSet(const std::set<std::string>& values)
+	{
+		if (values.empty())
+		{
+			return L"(none)";
+		}
+
+		std::wstring joined;
+		for (const auto& value : values)
+		{
+			if (!joined.empty())
+			{
+				joined += L", ";
+			}
+			joined += WidenAscii(value);
+		}
+		return joined;
+	}
+
+	std::wstring ProbeQemuLibretroTargets(const std::wstring& dllPath)
+	{
+		std::wstringstream report;
+		report << L"Target probe: reading " << dllPath << L"\r\n";
+
+		CREATEFILE2_EXTENDED_PARAMETERS params = {};
+		params.dwSize = sizeof(params);
+		HANDLE dll = CreateFile2(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &params);
+		if (dll == INVALID_HANDLE_VALUE)
+		{
+			report << L"Target probe: failed to open qemu_libretro.dll.";
+			return report.str();
+		}
+
+		LARGE_INTEGER size = {};
+		if (!GetFileSizeEx(dll, &size) || size.QuadPart <= 0 || size.QuadPart > 512LL * 1024LL * 1024LL)
+		{
+			CloseHandle(dll);
+			report << L"Target probe: invalid qemu_libretro.dll size.";
+			return report.str();
+		}
+
+		std::vector<unsigned char> data(static_cast<size_t>(size.QuadPart));
+		DWORD totalRead = 0;
+		DWORD chunkRead = 0;
+		while (totalRead < data.size())
+		{
+			DWORD remaining = static_cast<DWORD>((std::min)(data.size() - totalRead, static_cast<size_t>(1024 * 1024)));
+			if (!ReadFile(dll, data.data() + totalRead, remaining, &chunkRead, nullptr) || chunkRead == 0)
+			{
+				break;
+			}
+			totalRead += chunkRead;
+		}
+		CloseHandle(dll);
+
+		if (totalRead != data.size())
+		{
+			report << L"Target probe: incomplete DLL read.";
+			return report.str();
+		}
+
+		static const char* knownTargets[] =
+		{
+			"aarch64",
+			"alpha",
+			"arm",
+			"i386",
+			"m68k",
+			"mips",
+			"mips64",
+			"mips64el",
+			"mipsel",
+			"ppc",
+			"ppc64",
+			"riscv32",
+			"riscv64",
+			"s390x",
+			"sparc",
+			"sparc64",
+			"x86_64"
+		};
+
+		std::set<std::string> tableTargets;
+		size_t marker = FindAscii(data, "unsupported architecture");
+		size_t tableBegin = marker == std::wstring::npos || marker < 4096 ? 0 : marker - 4096;
+		size_t tableEnd = marker == std::wstring::npos ? data.size() : marker;
+		for (const char* target : knownTargets)
+		{
+			if (ContainsTerminatedAscii(data, target, tableBegin, tableEnd))
+			{
+				tableTargets.insert(target);
+			}
+		}
+
+		std::set<std::string> commandStrings;
+		const char* prefix = "qemu-system-";
+		size_t prefixLength = strlen(prefix);
+		for (size_t i = 0; i + prefixLength < data.size(); i++)
+		{
+			if (memcmp(data.data() + i, prefix, prefixLength) != 0)
+			{
+				continue;
+			}
+
+			size_t start = i + prefixLength;
+			size_t end = start;
+			while (end < data.size() && IsTargetChar(data[end]))
+			{
+				end++;
+			}
+			if (end > start)
+			{
+				std::string target(reinterpret_cast<const char*>(data.data() + start), end - start);
+				if (target != "ARCH")
+				{
+					commandStrings.insert(target);
+				}
+			}
+		}
+
+		report << L"Target probe: libretro arch table = " << JoinSet(tableTargets) << L"\r\n";
+		report << L"Target probe: embedded qemu-system strings = " << JoinSet(commandStrings) << L"\r\n";
+		report << L"Target probe: total targets from arch table = " << tableTargets.size() << L"\r\n";
+		report << L"Target probe: use qemu-system-<target> -machine help in qemu_cmd_line to validate machines/devices per architecture.";
+		return report.str();
+	}
+}
+
+DirectXPage::DirectXPage():
+	m_windowVisible(true),
+	m_coreInput(nullptr),
+	m_selectedBootFile(nullptr),
+	m_stagedBootFile(nullptr),
+	m_selectedDriveFile(nullptr),
+	m_selectedCdromFile(nullptr),
+	m_selectedCommandFile(nullptr),
+	m_stagedDriveFile(nullptr),
+	m_stagedCdromFile(nullptr),
+	m_stagedCommandFile(nullptr),
+	m_generatedCommandFile(nullptr),
+	m_driveNbdListener(nullptr),
+	m_cdromNbdListener(nullptr),
+	m_driveNbdSize(0),
+	m_cdromNbdSize(0),
+	m_driveNbdPort(0),
+	m_cdromNbdPort(0),
+	m_driveNbdReadOnly(true),
+	m_cdromNbdReadOnly(true),
+	m_argumentsHelpHideTimer(nullptr),
+	m_isStarting(false),
+	m_isRunning(false),
+	m_inputCaptured(true),
+	m_ctrlDown(false),
+	m_altDown(false),
+	m_inputSurfaceWidth(1.0),
+	m_inputSurfaceHeight(1.0),
+	m_emulatorPointerX(0.0),
+	m_emulatorPointerY(0.0),
+	m_lastPhysicalPointerX(0.0),
+	m_lastPhysicalPointerY(0.0),
+	m_havePhysicalPointerPosition(false)
+{
+	InitializeComponent();
+	UpdateCaptureIndicators();
+	m_inputSurfaceWidth = (std::max)(1.0, swapChainPanel->ActualWidth);
+	m_inputSurfaceHeight = (std::max)(1.0, swapChainPanel->ActualHeight);
+	m_emulatorPointerX = m_inputSurfaceWidth * 0.5;
+	m_emulatorPointerY = m_inputSurfaceHeight * 0.5;
+
+	m_argumentsHelpHideTimer = ref new DispatcherTimer();
+	TimeSpan hideDelay;
+	hideDelay.Duration = 10000000;
+	m_argumentsHelpHideTimer->Interval = hideDelay;
+	m_argumentsHelpHideTimer->Tick += ref new EventHandler<Object^>(this, &DirectXPage::ArgumentsHelpHideTimer_Tick);
+	if (architectureBox != nullptr && memorySlider != nullptr)
+	{
+		ComboBoxItem^ selectedArch = dynamic_cast<ComboBoxItem^>(architectureBox->SelectedItem);
+		if (selectedArch != nullptr)
+		{
+			std::wstring target(selectedArch->Content->ToString()->Data());
+			memorySlider->Value = GetTargetProfile(target).memoryMb;
+		}
+	}
+
+	// Register event handlers for the page lifecycle.
+	CoreWindow^ window = Window::Current->CoreWindow;
+
+	window->VisibilityChanged +=
+		ref new TypedEventHandler<CoreWindow^, VisibilityChangedEventArgs^>(this, &DirectXPage::OnVisibilityChanged);
+	window->KeyDown +=
+		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(this, &DirectXPage::OnKeyDown);
+	window->KeyUp +=
+		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(this, &DirectXPage::OnKeyUp);
+
+	DisplayInformation^ currentDisplayInformation = DisplayInformation::GetForCurrentView();
+
+	currentDisplayInformation->DpiChanged +=
+		ref new TypedEventHandler<DisplayInformation^, Object^>(this, &DirectXPage::OnDpiChanged);
+
+	currentDisplayInformation->OrientationChanged +=
+		ref new TypedEventHandler<DisplayInformation^, Object^>(this, &DirectXPage::OnOrientationChanged);
+
+	DisplayInformation::DisplayContentsInvalidated +=
+		ref new TypedEventHandler<DisplayInformation^, Object^>(this, &DirectXPage::OnDisplayContentsInvalidated);
+
+	swapChainPanel->CompositionScaleChanged += 
+		ref new TypedEventHandler<SwapChainPanel^, Object^>(this, &DirectXPage::OnCompositionScaleChanged);
+
+	swapChainPanel->SizeChanged +=
+		ref new SizeChangedEventHandler(this, &DirectXPage::OnSwapChainPanelSizeChanged);
+
+	// Device access is available at this point.
+	// Device-dependent resources can be created here.
+	m_deviceResources = std::make_shared<DX::DeviceResources>();
+	m_deviceResources->SetSwapChainPanel(swapChainPanel);
+
+	// Register the SwapChainPanel for independent pointer input events.
+	auto workItemHandler = ref new WorkItemHandler([this] (IAsyncAction ^)
+	{
+		// CoreIndependentInputSource raises pointer events for the specified device types on the thread where it is created.
+		m_coreInput = swapChainPanel->CreateCoreIndependentInputSource(
+			Windows::UI::Core::CoreInputDeviceTypes::Mouse |
+			Windows::UI::Core::CoreInputDeviceTypes::Touch |
+			Windows::UI::Core::CoreInputDeviceTypes::Pen
+			);
+
+		// Register pointer events raised on the background thread.
+		m_coreInput->PointerPressed += ref new TypedEventHandler<Object^, PointerEventArgs^>(this, &DirectXPage::OnPointerPressed);
+		m_coreInput->PointerMoved += ref new TypedEventHandler<Object^, PointerEventArgs^>(this, &DirectXPage::OnPointerMoved);
+		m_coreInput->PointerReleased += ref new TypedEventHandler<Object^, PointerEventArgs^>(this, &DirectXPage::OnPointerReleased);
+
+		// Start processing input messages as they are delivered.
+		m_coreInput->Dispatcher->ProcessEvents(CoreProcessEventsOption::ProcessUntilQuit);
+	});
+
+	// Run the task on a dedicated high-priority background thread.
+	m_inputLoopWorker = ThreadPool::RunAsync(workItemHandler, WorkItemPriority::High, WorkItemOptions::TimeSliced);
+
+	m_main = std::unique_ptr<Qemu_Libretro_UWPMain>(new Qemu_Libretro_UWPMain(m_deviceResources));
+	SetStatus(m_main->StatusText());
+	m_main->StartRenderLoop();
+}
+
+DirectXPage::~DirectXPage()
+{
+	StopAllMediaNbdServers();
+	// Stop rendering and event processing during destruction.
+	m_main->StopRenderLoop();
+	m_coreInput->Dispatcher->StopProcessEvents();
+}
+
+// Saves the current app state for suspend and termination events.
+void DirectXPage::SaveInternalState(IPropertySet^ state)
+{
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	m_deviceResources->Trim();
+
+	// Stop rendering when the app is suspended.
+	m_main->StopRenderLoop();
+
+	// Add app state save code here.
+}
+
+// Loads the current app state for resume events.
+void DirectXPage::LoadInternalState(IPropertySet^ state)
+{
+	// Add app state load code here.
+
+	// Start rendering when the app is resumed.
+	m_main->StartRenderLoop();
+}
+
+// Manipuladores de eventos da janela.
+
+void DirectXPage::OnVisibilityChanged(CoreWindow^ sender, VisibilityChangedEventArgs^ args)
+{
+	m_windowVisible = args->Visible;
+	if (m_windowVisible)
+	{
+		m_main->StartRenderLoop();
+	}
+	else
+	{
+		m_main->StopRenderLoop();
+	}
+}
+
+// Manipuladores de eventos DisplayInformation.
+
+void DirectXPage::OnDpiChanged(DisplayInformation^ sender, Object^ args)
+{
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	// Note: the LogicalDpi value retrieved here may not match the app's effective DPI
+	// if it is being scaled for high-resolution devices. After DPI is set in DeviceResources,
+	// always retrieve it with GetDpi.
+	// Consulte DeviceResources.cpp para obter mais detalhes.
+	m_deviceResources->SetDpi(sender->LogicalDpi);
+	m_main->CreateWindowSizeDependentResources();
+}
+
+void DirectXPage::OnOrientationChanged(DisplayInformation^ sender, Object^ args)
+{
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	m_deviceResources->SetCurrentOrientation(sender->CurrentOrientation);
+	m_main->CreateWindowSizeDependentResources();
+}
+
+void DirectXPage::OnDisplayContentsInvalidated(DisplayInformation^ sender, Object^ args)
+{
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	m_deviceResources->ValidateDevice();
+}
+
+void DirectXPage::SelectBootButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	SelectDriveButton_Click(sender, e);
+}
+
+void DirectXPage::SelectDriveButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	FileOpenPicker^ picker = ref new FileOpenPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	picker->FileTypeFilter->Append(".iso");
+	picker->FileTypeFilter->Append(".img");
+	picker->FileTypeFilter->Append(".raw");
+	picker->FileTypeFilter->Append(".qcow");
+	picker->FileTypeFilter->Append(".qcow2");
+	picker->FileTypeFilter->Append(".qed");
+	picker->FileTypeFilter->Append(".vdi");
+	picker->FileTypeFilter->Append(".vmdk");
+	picker->FileTypeFilter->Append(".vhd");
+	picker->FileTypeFilter->Append(".vpc");
+	picker->FileTypeFilter->Append(".vhdx");
+	picker->FileTypeFilter->Append(".bochs");
+	picker->FileTypeFilter->Append(".cloop");
+	picker->FileTypeFilter->Append(".dmg");
+	picker->FileTypeFilter->Append(".hds");
+	picker->FileTypeFilter->Append(".parallels");
+	picker->FileTypeFilter->Append(".qemu_cmd_line");
+
+	SetStatus(L"Opening file picker...");
+	Concurrency::create_task(picker->PickSingleFileAsync()).then([this](StorageFile^ file)
+	{
+		if (file == nullptr)
+		{
+			SetStatus(L"Selection canceled.");
+			return;
+		}
+
+		m_selectedBootFile = file;
+		m_stagedBootFile = nullptr;
+		m_stagedDriveFile = nullptr;
+		m_stagedCommandFile = nullptr;
+		StopMediaNbdServer(false);
+		if (IsCommandLineFile(file))
+		{
+			m_selectedCommandFile = file;
+			m_selectedDriveFile = nullptr;
+			m_selectedCdromFile = nullptr;
+			selectedDriveText->Text = file->Path;
+			selectedCdromText->Text = "No CD-ROM selected";
+		}
+		else
+		{
+			m_selectedCommandFile = nullptr;
+			m_selectedDriveFile = file;
+			selectedDriveText->Text = file->Path;
+		}
+		SetStatus(L"File selected. Review qemu_cmd_line and click Start.");
+
+		if (IsCommandLineFile(file))
+		{
+			Concurrency::create_task(FileIO::ReadTextAsync(file)).then([this](String^ text)
+			{
+				commandLineBox->Text = text;
+			});
+		}
+		else
+		{
+			RefreshCommandLinePreview();
+		}
+	});
+}
+
+void DirectXPage::SelectCdromButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	FileOpenPicker^ picker = ref new FileOpenPicker();
+	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
+	picker->FileTypeFilter->Append(".iso");
+
+	SetStatus(L"Opening CD-ROM picker...");
+	Concurrency::create_task(picker->PickSingleFileAsync()).then([this](StorageFile^ file)
+	{
+		if (file == nullptr)
+		{
+			SetStatus(L"Selection canceled.");
+			return;
+		}
+
+		m_selectedCommandFile = nullptr;
+		m_selectedCdromFile = file;
+		m_stagedCdromFile = nullptr;
+		StopMediaNbdServer(true);
+		selectedCdromText->Text = file->Path;
+		SetStatus(L"CD-ROM selected. Review qemu_cmd_line and click Start.");
+		RefreshCommandLinePreview();
+	});
+}
+
+void DirectXPage::StartButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	if (m_isStarting)
+	{
+		AppendError(L"Start ignored: the emulator is still starting.");
+		tabPanel->SelectedIndex = 1;
+		return;
+	}
+	if (m_isRunning)
+	{
+		AppendError(L"Start ignored: the emulator is already running.");
+		tabPanel->SelectedIndex = 1;
+		return;
+	}
+	if (m_selectedCommandFile == nullptr && m_selectedDriveFile == nullptr && m_selectedCdromFile == nullptr)
+	{
+		AppendError(L"No drive, CD-ROM, or qemu_cmd_line file selected.");
+		tabPanel->SelectedIndex = 1;
+		return;
+	}
+
+	SetStartState(true, false);
+	StageBootFileAndStart();
+}
+
+void DirectXPage::WriteCommandLineAndStart(String^ commandLine)
+{
+	if (commandLine == nullptr || commandLine->Length() == 0)
+	{
+		AppendError(L"qemu_cmd_line is empty. Select media or review the boot options.");
+		tabPanel->SelectedIndex = 1;
+		SetStartState(false, false);
+		return;
+	}
+
+	SetStatus(L"Generating current.qemu_cmd_line...");
+	AppendError(L"Start: generating current.qemu_cmd_line.");
+	std::wstring commandLog = L"Start: qemu_cmd_line: ";
+	commandLog += commandLine->Data();
+	AppendError(commandLog);
+	auto createFileTask = ApplicationData::Current->LocalFolder->CreateFileAsync(
+		"current.qemu_cmd_line",
+		CreationCollisionOption::ReplaceExisting);
+
+	Concurrency::create_task(createFileTask).then([this, commandLine](Concurrency::task<StorageFile^> createTask)
+	{
+		try
+		{
+			m_generatedCommandFile = createTask.get();
+			return Concurrency::create_task(FileIO::WriteTextAsync(m_generatedCommandFile, commandLine));
+		}
+		catch (Exception^ ex)
+		{
+			std::wstring error = L"Failed to create current.qemu_cmd_line: ";
+			error += ex->Message->Data();
+			AppendError(error);
+			SetStatus(error);
+			tabPanel->SelectedIndex = 1;
+			SetStartState(false, false);
+			return Concurrency::task_from_result();
+		}
+	}).then([this](Concurrency::task<void> writeTask)
+	{
+		try
+		{
+			writeTask.get();
+			if (!m_isStarting)
+			{
+				return;
+			}
+			AppendError(L"Start: current.qemu_cmd_line written. Loading libretro core.");
+			StartWithCommandFile(m_generatedCommandFile);
+		}
+		catch (Exception^ ex)
+		{
+			std::wstring error = L"Failed to write current.qemu_cmd_line: ";
+			error += ex->Message->Data();
+			AppendError(error);
+			SetStatus(error);
+			tabPanel->SelectedIndex = 1;
+			SetStartState(false, false);
+		}
+	});
+}
+
+void DirectXPage::StageBootFileAndStart()
+{
+	SetStatus(L"Preparing media in the app local storage...");
+	AppendError(L"Start: preparing media in LocalFolder\\boot_media.");
+	m_stagedCommandFile = nullptr;
+	m_stagedDriveFile = nullptr;
+	m_stagedCdromFile = nullptr;
+
+	Concurrency::create_task(ApplicationData::Current->LocalFolder->CreateFolderAsync(
+		"boot_media",
+		CreationCollisionOption::OpenIfExists)).then([this](Concurrency::task<StorageFolder^> folderTask)
+	{
+		try
+		{
+			StorageFolder^ folder = folderTask.get();
+			if (m_selectedCommandFile != nullptr)
+			{
+				return Concurrency::create_task(m_selectedCommandFile->CopyAsync(
+					folder,
+					m_selectedCommandFile->Name,
+					NameCollisionOption::ReplaceExisting)).then([this](StorageFile^ file)
+				{
+					m_stagedCommandFile = file;
+				});
+			}
+
+			auto driveTask = m_selectedDriveFile != nullptr
+				? Concurrency::create_task(m_selectedDriveFile->CopyAsync(folder, m_selectedDriveFile->Name, NameCollisionOption::ReplaceExisting))
+				: Concurrency::task_from_result<StorageFile^>(nullptr);
+
+			return driveTask.then([this, folder](StorageFile^ driveFile)
+			{
+				m_stagedDriveFile = driveFile;
+				auto cdromTask = m_selectedCdromFile != nullptr
+					? Concurrency::create_task(m_selectedCdromFile->CopyAsync(folder, m_selectedCdromFile->Name, NameCollisionOption::ReplaceExisting))
+					: Concurrency::task_from_result<StorageFile^>(nullptr);
+
+				return cdromTask.then([this](StorageFile^ cdromFile)
+				{
+					m_stagedCdromFile = cdromFile;
+				});
+			});
+		}
+		catch (Exception^ ex)
+		{
+			std::wstring error = L"Failed to prepare boot_media folder: ";
+			error += ex->Message->Data();
+			AppendError(error);
+			SetStatus(error);
+			tabPanel->SelectedIndex = 1;
+			SetStartState(false, false);
+			return Concurrency::task_from_result();
+		}
+	}).then([this](Concurrency::task<void> stageTask)
+	{
+		try
+		{
+			stageTask.get();
+			if (m_stagedCommandFile != nullptr)
+			{
+				std::wstring staged = L"Start: qemu_cmd_line prepared at ";
+				staged += m_stagedCommandFile->Path->Data();
+				AppendError(staged);
+				StartWithCommandFile(m_stagedCommandFile);
+				return;
+			}
+
+			if (m_stagedDriveFile == nullptr && m_stagedCdromFile == nullptr)
+			{
+				AppendError(L"Start: no media was prepared.");
+				SetStartState(false, false);
+				return;
+			}
+
+			if (m_stagedDriveFile != nullptr)
+			{
+				std::wstring staged = L"Start: drive prepared at ";
+				staged += m_stagedDriveFile->Path->Data();
+				AppendError(staged);
+			}
+			if (m_stagedCdromFile != nullptr)
+			{
+				std::wstring staged = L"Start: CD-ROM prepared at ";
+				staged += m_stagedCdromFile->Path->Data();
+				AppendError(staged);
+			}
+
+			commandLineBox->Text = BuildCommandLine();
+			std::wstring profile = L"Start: test profile: ";
+			ComboBoxItem^ selectedProfile = diagnosticProfileBox != nullptr ? dynamic_cast<ComboBoxItem^>(diagnosticProfileBox->SelectedItem) : nullptr;
+			profile += selectedProfile != nullptr ? selectedProfile->Content->ToString()->Data() : L"Normal command";
+			AppendError(profile);
+			WriteCommandLineAndStart(commandLineBox->Text);
+		}
+		catch (Exception^ ex)
+		{
+			std::wstring error = L"Failed to copy boot file to LocalFolder: ";
+			error += ex->Message->Data();
+			AppendError(error);
+			SetStatus(error);
+			tabPanel->SelectedIndex = 1;
+			SetStartState(false, false);
+		}
+	});
+}
+void DirectXPage::ResetButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	m_main->ResetCore();
+	SetStatus(L"Reset sent to core.");
+}
+
+void DirectXPage::ShowTabsButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	if (topPanel->Visibility == Windows::UI::Xaml::Visibility::Visible)
+	{
+		topPanel->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
+		showTabsButton->Label = "Show tabs";
+	}
+	else
+	{
+		topPanel->Visibility = Windows::UI::Xaml::Visibility::Visible;
+		showTabsButton->Label = "Hide tabs";
+	}
+}
+
+void DirectXPage::DetectTargetsButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+
+	SetStatus(L"Detecting systems supported by qemu_libretro.dll...");
+	if (detectTargetsButton != nullptr)
+	{
+		detectTargetsButton->IsEnabled = false;
+	}
+
+	std::wstring dllPath(Package::Current->InstalledLocation->Path->Data());
+	dllPath += L"\\qemu_libretro.dll";
+	auto result = std::make_shared<std::wstring>();
+	auto dispatcher = Dispatcher;
+	create_task([dllPath, result]()
+	{
+		*result = ProbeQemuLibretroTargets(dllPath);
+	}).then([this, dispatcher, result]()
+	{
+		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, result]()
+		{
+			AppendError(*result);
+			SetStatus(L"Supported systems probe completed.");
+			tabPanel->SelectedIndex = 1;
+			if (detectTargetsButton != nullptr)
+			{
+				detectTargetsButton->IsEnabled = true;
+			}
+		}));
+	});
+}
+
+void DirectXPage::UpdateCommandLineButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	commandLineBox->Text = BuildCommandLine();
+	SetStatus(L"qemu_cmd_line updated with additional arguments.");
+}
+
+void DirectXPage::ArgumentsHelpButton_PointerEntered(Object^ sender, PointerRoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if (m_argumentsHelpHideTimer != nullptr)
+	{
+		m_argumentsHelpHideTimer->Stop();
+	}
+	if (argumentsHelpPanel != nullptr)
+	{
+		argumentsHelpPanel->Visibility = Windows::UI::Xaml::Visibility::Visible;
+	}
+}
+
+void DirectXPage::ArgumentsHelpButton_PointerExited(Object^ sender, PointerRoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if (m_argumentsHelpHideTimer != nullptr)
+	{
+		m_argumentsHelpHideTimer->Stop();
+		m_argumentsHelpHideTimer->Start();
+	}
+}
+
+void DirectXPage::ArgumentsHelpHideTimer_Tick(Object^ sender, Object^ e)
+{
+	(void)sender;
+	(void)e;
+	if (m_argumentsHelpHideTimer != nullptr)
+	{
+		m_argumentsHelpHideTimer->Stop();
+	}
+	if (argumentsHelpPanel != nullptr)
+	{
+		argumentsHelpPanel->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
+	}
+}
+
+void DirectXPage::BootOption_Changed(Object^ sender, RoutedEventArgs^ e)
+{
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::BootOptionText_Changed(Object^ sender, TextChangedEventArgs^ e)
+{
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::Architecture_Changed(Object^ sender, SelectionChangedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+
+	if (architectureBox == nullptr || memorySlider == nullptr)
+	{
+		return;
+	}
+
+	ComboBoxItem^ selectedArch = dynamic_cast<ComboBoxItem^>(architectureBox->SelectedItem);
+	if (selectedArch != nullptr)
+	{
+		std::wstring target(selectedArch->Content->ToString()->Data());
+		TargetProfile profile = GetTargetProfile(target);
+		memorySlider->Value = profile.memoryMb;
+	}
+
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::DiagnosticProfile_Changed(Object^ sender, SelectionChangedEventArgs^ e)
+{
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::MemorySlider_ValueChanged(Object^ sender, RangeBaseValueChangedEventArgs^ e)
+{
+	int memoryMb = static_cast<int>(e->NewValue + 0.5);
+	if (memoryValueText != nullptr)
+	{
+		if (memoryMb <= 0)
+		{
+			memoryValueText->Text = "Default";
+		}
+		else
+		{
+			std::wstring text = std::to_wstring(memoryMb);
+			text += L" MB";
+			memoryValueText->Text = ref new String(text.c_str());
+		}
+	}
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::OnKeyDown(CoreWindow^ sender, KeyEventArgs^ args)
+{
+	VirtualKey keyCode = args->VirtualKey;
+	m_ctrlDown = IsControlDown();
+	m_altDown = IsAltDown();
+	if (keyCode == VirtualKey::Control || keyCode == VirtualKey::LeftControl || keyCode == VirtualKey::RightControl)
+	{
+		m_ctrlDown = true;
+	}
+	if (keyCode == VirtualKey::Menu || keyCode == VirtualKey::LeftMenu || keyCode == VirtualKey::RightMenu)
+	{
+		m_altDown = true;
+	}
+	if (keyCode == VirtualKey::M && (m_ctrlDown || IsControlDown()) && (m_altDown || IsAltDown()))
+	{
+		ToggleInputCapture();
+		args->Handled = true;
+		return;
+	}
+	if (!m_isRunning || !m_inputCaptured)
+	{
+		return;
+	}
+
+	unsigned key = MapVirtualKeyToRetro(args->VirtualKey);
+	if (key != 0)
+	{
+		m_main->SetKey(key, true);
+		args->Handled = true;
+	}
+}
+
+void DirectXPage::OnKeyUp(CoreWindow^ sender, KeyEventArgs^ args)
+{
+	VirtualKey keyCode = args->VirtualKey;
+	if (keyCode == VirtualKey::Control || keyCode == VirtualKey::LeftControl || keyCode == VirtualKey::RightControl)
+	{
+		m_ctrlDown = IsControlDown();
+	}
+	if (keyCode == VirtualKey::Menu || keyCode == VirtualKey::LeftMenu || keyCode == VirtualKey::RightMenu)
+	{
+		m_altDown = IsAltDown();
+	}
+	if (!m_isRunning || !m_inputCaptured)
+	{
+		return;
+	}
+
+	unsigned key = MapVirtualKeyToRetro(args->VirtualKey);
+	if (key != 0)
+	{
+		m_main->SetKey(key, false);
+		args->Handled = true;
+	}
+}
+
+void DirectXPage::OnPointerPressed(Object^ sender, PointerEventArgs^ e)
+{
+	if (!m_isRunning || !m_inputCaptured)
+	{
+		return;
+	}
+
+	SendPointerToCore(e);
+}
+
+void DirectXPage::OnPointerMoved(Object^ sender, PointerEventArgs^ e)
+{
+	if (!m_isRunning || !m_inputCaptured)
+	{
+		return;
+	}
+
+	SendPointerToCore(e);
+}
+
+void DirectXPage::OnPointerReleased(Object^ sender, PointerEventArgs^ e)
+{
+	if (!m_isRunning || !m_inputCaptured)
+	{
+		return;
+	}
+
+	SendPointerToCore(e);
+}
+
+void DirectXPage::OnCompositionScaleChanged(SwapChainPanel^ sender, Object^ args)
+{
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	m_deviceResources->SetCompositionScale(sender->CompositionScaleX, sender->CompositionScaleY);
+	m_main->CreateWindowSizeDependentResources();
+}
+
+void DirectXPage::OnSwapChainPanelSizeChanged(Object^ sender, SizeChangedEventArgs^ e)
+{
+	m_inputSurfaceWidth = (std::max)(1.0, static_cast<double>(e->NewSize.Width));
+	m_inputSurfaceHeight = (std::max)(1.0, static_cast<double>(e->NewSize.Height));
+	m_emulatorPointerX = (std::max)(0.0, (std::min)(m_inputSurfaceWidth, m_emulatorPointerX));
+	m_emulatorPointerY = (std::max)(0.0, (std::min)(m_inputSurfaceHeight, m_emulatorPointerY));
+
+	critical_section::scoped_lock lock(m_main->GetCriticalSection());
+	m_deviceResources->SetLogicalSize(e->NewSize);
+	m_main->CreateWindowSizeDependentResources();
+}
+
+void DirectXPage::SetStartState(bool starting, bool running)
+{
+	m_isStarting = starting;
+	m_isRunning = running;
+	if (startButton != nullptr)
+	{
+		startButton->IsEnabled = !starting && !running;
+		if (starting)
+		{
+			startButton->Label = "Starting";
+		}
+		else if (running)
+		{
+			startButton->Label = "Running";
+		}
+		else
+		{
+			startButton->Label = "Start";
+		}
+	}
+	UpdateCaptureIndicators();
+}
+
+void DirectXPage::SetStatus(const std::wstring& text)
+{
+	statusText->Text = ref new String(text.c_str());
+}
+
+void DirectXPage::ToggleInputCapture()
+{
+	m_inputCaptured = !m_inputCaptured;
+	m_main->ClearInput();
+	m_havePhysicalPointerPosition = false;
+	UpdateCaptureIndicators();
+	if (m_inputCaptured)
+	{
+		FocusEmulatorSurface();
+	}
+	SetStatus(m_inputCaptured
+		? L"Input captured by the emulator. Ctrl+Alt+M releases mouse and keyboard."
+		: L"Input released to the interface. Ctrl+Alt+M captures mouse and keyboard.");
+}
+
+void DirectXPage::UpdateCaptureIndicators()
+{
+	Windows::UI::Xaml::Visibility state = (m_isRunning && m_inputCaptured)
+		? Windows::UI::Xaml::Visibility::Visible
+		: Windows::UI::Xaml::Visibility::Collapsed;
+	bool controlsCanTakeKeyboard = !(m_isRunning && m_inputCaptured);
+	if (showTabsButton != nullptr)
+	{
+		showTabsButton->IsTabStop = controlsCanTakeKeyboard;
+	}
+	if (startButton != nullptr)
+	{
+		startButton->IsTabStop = controlsCanTakeKeyboard;
+	}
+	if (keyboardCaptureIcon != nullptr)
+	{
+		keyboardCaptureIcon->Visibility = state;
+	}
+	if (mouseCaptureIcon != nullptr)
+	{
+		mouseCaptureIcon->Visibility = state;
+	}
+	if (m_isRunning && m_inputCaptured)
+	{
+		FocusEmulatorSurface();
+	}
+}
+
+void DirectXPage::FocusEmulatorSurface()
+{
+	try
+	{
+		this->Focus(Windows::UI::Xaml::FocusState::Programmatic);
+	}
+	catch (...)
+	{
+	}
+}
+
+void DirectXPage::SendPointerToCore(PointerEventArgs^ e)
+{
+	auto point = e->CurrentPoint;
+	auto props = point->Properties;
+	double width = m_inputSurfaceWidth;
+	double height = m_inputSurfaceHeight;
+	if (width <= 1.0 || height <= 1.0)
+	{
+		return;
+	}
+
+	double physicalX = static_cast<double>(point->Position.X);
+	double physicalY = static_cast<double>(point->Position.Y);
+	double clampedX = (std::max)(0.0, (std::min)(width, physicalX));
+	double clampedY = (std::max)(0.0, (std::min)(height, physicalY));
+	if (m_havePhysicalPointerPosition)
+	{
+		m_emulatorPointerX = (std::max)(0.0, (std::min)(width, m_emulatorPointerX + physicalX - m_lastPhysicalPointerX));
+		m_emulatorPointerY = (std::max)(0.0, (std::min)(height, m_emulatorPointerY + physicalY - m_lastPhysicalPointerY));
+	}
+	else
+	{
+		m_emulatorPointerX = clampedX;
+		m_emulatorPointerY = clampedY;
+		m_havePhysicalPointerPosition = true;
+	}
+	m_lastPhysicalPointerX = physicalX;
+	m_lastPhysicalPointerY = physicalY;
+	m_main->SetPointer(
+		static_cast<float>(m_emulatorPointerX),
+		static_cast<float>(m_emulatorPointerY),
+		props->IsLeftButtonPressed,
+		props->IsRightButtonPressed,
+		props->IsMiddleButtonPressed);
+}
+
+void DirectXPage::AppendError(const std::wstring& text)
+{
+	std::wstring line = text;
+	line += L"\r\n";
+	OutputDebugStringW(line.c_str());
+
+	std::wstring logPath(ApplicationData::Current->LocalFolder->Path->Data());
+	logPath += L"\\qemu-uwp.log";
+	CREATEFILE2_EXTENDED_PARAMETERS params = {};
+	params.dwSize = sizeof(params);
+	HANDLE logFile = CreateFile2(logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, OPEN_ALWAYS, &params);
+	if (logFile != INVALID_HANDLE_VALUE)
+	{
+		int size = WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()), nullptr, 0, nullptr, nullptr);
+		if (size > 0)
+		{
+			std::string utf8(size, '\0');
+			WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()), &utf8[0], size, nullptr, nullptr);
+			DWORD written = 0;
+			WriteFile(logFile, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+			FlushFileBuffers(logFile);
+		}
+		CloseHandle(logFile);
+	}
+
+	if (errorLogBox->Text == "No errors recorded.")
+	{
+		errorLogBox->Text = "";
+	}
+
+	std::wstring current(errorLogBox->Text->Data());
+	if (!current.empty())
+	{
+		current += L"\r\n";
+	}
+	current += text;
+	errorLogBox->Text = ref new String(current.c_str());
+}
+
+void DirectXPage::RefreshCommandLinePreview()
+{
+	if (commandLineBox == nullptr || m_selectedCommandFile != nullptr)
+	{
+		return;
+	}
+
+	if (m_selectedDriveFile == nullptr && m_selectedCdromFile == nullptr &&
+		m_stagedDriveFile == nullptr && m_stagedCdromFile == nullptr)
+	{
+		return;
+	}
+
+	commandLineBox->Text = BuildCommandLine();
+}
+
+bool DirectXPage::EnsureMediaNbdServer(StorageFile^ mediaFile, bool readOnly, bool cdromMedia, std::wstring& url)
+{
+	if (mediaFile == nullptr)
+	{
+		return false;
+	}
+
+	std::wstring mediaPath(mediaFile->Path->Data());
+	StreamSocketListener^ currentListener = cdromMedia ? m_cdromNbdListener : m_driveNbdListener;
+	std::wstring& currentPath = cdromMedia ? m_cdromNbdPath : m_driveNbdPath;
+	uint64_t& currentSize = cdromMedia ? m_cdromNbdSize : m_driveNbdSize;
+	int& currentPort = cdromMedia ? m_cdromNbdPort : m_driveNbdPort;
+	bool& currentReadOnly = cdromMedia ? m_cdromNbdReadOnly : m_driveNbdReadOnly;
+
+	if (currentListener != nullptr && currentPath == mediaPath && currentPort > 0 && currentReadOnly == readOnly)
+	{
+		url = L"nbd://127.0.0.1:" + std::to_wstring(currentPort);
+		return true;
+	}
+
+	StopMediaNbdServer(cdromMedia);
+
+	CREATEFILE2_EXTENDED_PARAMETERS params = {};
+	params.dwSize = sizeof(params);
+	DWORD desiredAccess = readOnly ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE);
+	HANDLE media = CreateFile2(mediaPath.c_str(), desiredAccess, FILE_SHARE_READ, OPEN_EXISTING, &params);
+	if (media == INVALID_HANDLE_VALUE)
+	{
+		if (!readOnly)
+		{
+			AppendError(L"Start: media could not be opened for writing; using read-only NBD.");
+			readOnly = true;
+			desiredAccess = GENERIC_READ;
+			media = CreateFile2(mediaPath.c_str(), desiredAccess, FILE_SHARE_READ, OPEN_EXISTING, &params);
+		}
+		if (media == INVALID_HANDLE_VALUE)
+		{
+			AppendError(L"Start: could not open media for the local NBD server.");
+			return false;
+		}
+	}
+
+	LARGE_INTEGER size = {};
+	bool sizeOk = GetFileSizeEx(media, &size) != 0;
+	CloseHandle(media);
+	if (!sizeOk || size.QuadPart <= 0)
+	{
+		AppendError(L"Start: invalid media size for the local NBD server.");
+		return false;
+	}
+
+	for (int port = 10809; port <= 10839; port++)
+	{
+		auto listener = ref new StreamSocketListener();
+		listener->ConnectionReceived += ref new TypedEventHandler<StreamSocketListener^, StreamSocketListenerConnectionReceivedEventArgs^>(
+			this, &DirectXPage::OnMediaNbdConnectionReceived);
+
+		try
+		{
+			create_task(listener->BindServiceNameAsync(ref new String(std::to_wstring(port).c_str()))).wait();
+			if (cdromMedia)
+			{
+				m_cdromNbdListener = listener;
+			}
+			else
+			{
+				m_driveNbdListener = listener;
+			}
+			currentPath = mediaPath;
+			currentSize = static_cast<uint64_t>(size.QuadPart);
+			currentPort = port;
+			currentReadOnly = readOnly;
+			url = L"nbd://127.0.0.1:" + std::to_wstring(port);
+			AppendError((readOnly ? L"Start: local read-only NBD server started at " : L"Start: local read-write NBD server started at ") + url +
+				(cdromMedia ? L" for CD-ROM." : L" for Drive."));
+			return true;
+		}
+		catch (Exception^ ex)
+		{
+			std::wstring bindError = L"Start: porta NBD local indisponivel ";
+			bindError += std::to_wstring(port);
+			if (ex != nullptr && ex->Message != nullptr)
+			{
+				bindError += L": ";
+				bindError += ex->Message->Data();
+			}
+			AppendError(bindError);
+			delete listener;
+		}
+	}
+
+	AppendError(L"Start: could not start local media NBD server.");
+	return false;
+}
+
+void DirectXPage::StopMediaNbdServer(bool cdromMedia)
+{
+	StreamSocketListener^& listener = cdromMedia ? m_cdromNbdListener : m_driveNbdListener;
+	std::wstring& path = cdromMedia ? m_cdromNbdPath : m_driveNbdPath;
+	uint64_t& size = cdromMedia ? m_cdromNbdSize : m_driveNbdSize;
+	int& port = cdromMedia ? m_cdromNbdPort : m_driveNbdPort;
+	bool& readOnly = cdromMedia ? m_cdromNbdReadOnly : m_driveNbdReadOnly;
+
+	if (listener != nullptr)
+	{
+		delete listener;
+		listener = nullptr;
+	}
+	path.clear();
+	size = 0;
+	port = 0;
+	readOnly = true;
+}
+
+void DirectXPage::StopAllMediaNbdServers()
+{
+	StopMediaNbdServer(false);
+	StopMediaNbdServer(true);
+}
+
+void DirectXPage::OnMediaNbdConnectionReceived(StreamSocketListener^ sender, StreamSocketListenerConnectionReceivedEventArgs^ args)
+{
+	auto socket = args->Socket;
+	bool cdromMedia = sender == m_cdromNbdListener;
+	std::wstring mediaPath = cdromMedia ? m_cdromNbdPath : m_driveNbdPath;
+	uint64_t mediaSize = cdromMedia ? m_cdromNbdSize : m_driveNbdSize;
+	bool readOnly = cdromMedia ? m_cdromNbdReadOnly : m_driveNbdReadOnly;
+	create_task([this, socket, mediaPath, mediaSize, readOnly]()
+	{
+		ServeMediaNbdClient(socket, mediaPath, mediaSize, readOnly);
+	});
+}
+
+void DirectXPage::ServeMediaNbdClient(StreamSocket^ socket, std::wstring mediaPath, uint64_t mediaSize, bool readOnly)
+{
+	try
+	{
+		auto reader = ref new DataReader(socket->InputStream);
+		reader->InputStreamOptions = InputStreamOptions::None;
+		auto writer = ref new DataWriter(socket->OutputStream);
+
+		auto writeBe16 = [writer](uint16_t value)
+		{
+			unsigned char bytes[2] =
+			{
+				static_cast<unsigned char>((value >> 8) & 0xff),
+				static_cast<unsigned char>(value & 0xff)
+			};
+			writer->WriteBytes(ref new Platform::Array<unsigned char>(bytes, 2));
+		};
+		auto writeBe32 = [writer](uint32_t value)
+		{
+			unsigned char bytes[4] =
+			{
+				static_cast<unsigned char>((value >> 24) & 0xff),
+				static_cast<unsigned char>((value >> 16) & 0xff),
+				static_cast<unsigned char>((value >> 8) & 0xff),
+				static_cast<unsigned char>(value & 0xff)
+			};
+			writer->WriteBytes(ref new Platform::Array<unsigned char>(bytes, 4));
+		};
+		auto writeBe64 = [writer](uint64_t value)
+		{
+			unsigned char bytes[8] =
+			{
+				static_cast<unsigned char>((value >> 56) & 0xff),
+				static_cast<unsigned char>((value >> 48) & 0xff),
+				static_cast<unsigned char>((value >> 40) & 0xff),
+				static_cast<unsigned char>((value >> 32) & 0xff),
+				static_cast<unsigned char>((value >> 24) & 0xff),
+				static_cast<unsigned char>((value >> 16) & 0xff),
+				static_cast<unsigned char>((value >> 8) & 0xff),
+				static_cast<unsigned char>(value & 0xff)
+			};
+			writer->WriteBytes(ref new Platform::Array<unsigned char>(bytes, 8));
+		};
+		auto readBe16 = [reader]() -> uint16_t
+		{
+			unsigned char b0 = reader->ReadByte();
+			unsigned char b1 = reader->ReadByte();
+			return (static_cast<uint16_t>(b0) << 8) | b1;
+		};
+		auto readBe32 = [reader]() -> uint32_t
+		{
+			uint32_t value = 0;
+			for (int i = 0; i < 4; i++)
+			{
+				value = (value << 8) | reader->ReadByte();
+			}
+			return value;
+		};
+		auto readBe64 = [reader]() -> uint64_t
+		{
+			uint64_t value = 0;
+			for (int i = 0; i < 8; i++)
+			{
+				value = (value << 8) | reader->ReadByte();
+			}
+			return value;
+		};
+
+		writeBe64(0x4e42444d41474943ULL);
+		writeBe64(0x0000420281861253ULL);
+		writeBe64(mediaSize);
+		writeBe32(readOnly ? 0x00000003 : 0x00000001);
+		auto zeroes = ref new Platform::Array<unsigned char>(124);
+		writer->WriteBytes(zeroes);
+		create_task(writer->StoreAsync()).wait();
+
+		CREATEFILE2_EXTENDED_PARAMETERS params = {};
+		params.dwSize = sizeof(params);
+		DWORD access = readOnly ? GENERIC_READ : (GENERIC_READ | GENERIC_WRITE);
+		HANDLE media = CreateFile2(mediaPath.c_str(), access, FILE_SHARE_READ, OPEN_EXISTING, &params);
+		if (media == INVALID_HANDLE_VALUE)
+		{
+			delete writer;
+			delete reader;
+			delete socket;
+			return;
+		}
+
+		while (true)
+		{
+			unsigned int loaded = create_task(reader->LoadAsync(28)).get();
+			if (loaded < 28)
+			{
+				break;
+			}
+
+			uint32_t magic = readBe32();
+			uint16_t flags = readBe16();
+			(void)flags;
+			uint16_t type = readBe16();
+			uint64_t handle = readBe64();
+			uint64_t offset = readBe64();
+			uint32_t length = readBe32();
+			if (magic != 0x25609513)
+			{
+				break;
+			}
+			if (type == 2)
+			{
+				break;
+			}
+
+			uint32_t error = 0;
+			std::vector<unsigned char> payload;
+			if (type == 0)
+			{
+				if (offset + length > mediaSize)
+				{
+					error = 22;
+				}
+				else
+				{
+					payload.resize(length);
+					LARGE_INTEGER position = {};
+					position.QuadPart = static_cast<LONGLONG>(offset);
+					SetFilePointerEx(media, position, nullptr, FILE_BEGIN);
+					DWORD read = 0;
+					if (!ReadFile(media, payload.data(), length, &read, nullptr) || read != length)
+					{
+						error = 5;
+					}
+				}
+			}
+			else if (type == 1)
+			{
+				payload.resize(length);
+				if (length > 0)
+				{
+					unsigned int writePayloadLoaded = create_task(reader->LoadAsync(length)).get();
+					if (writePayloadLoaded < length)
+					{
+						break;
+					}
+					auto writePayload = ref new Platform::Array<unsigned char>(length);
+					reader->ReadBytes(writePayload);
+					memcpy(payload.data(), writePayload->Data, length);
+				}
+
+				if (readOnly)
+				{
+					error = 1;
+				}
+				else if (offset + length > mediaSize)
+				{
+					error = 22;
+				}
+				else
+				{
+					LARGE_INTEGER position = {};
+					position.QuadPart = static_cast<LONGLONG>(offset);
+					SetFilePointerEx(media, position, nullptr, FILE_BEGIN);
+					DWORD written = 0;
+					if (!WriteFile(media, payload.data(), length, &written, nullptr) || written != length)
+					{
+						error = 5;
+					}
+				}
+			}
+			else if (type != 3)
+			{
+				error = 95;
+			}
+
+			writeBe32(0x67446698);
+			writeBe32(error);
+			writeBe64(handle);
+			if (error == 0 && type == 0 && !payload.empty())
+			{
+				writer->WriteBytes(ref new Platform::Array<unsigned char>(payload.data(), static_cast<unsigned int>(payload.size())));
+			}
+			create_task(writer->StoreAsync()).wait();
+		}
+
+		CloseHandle(media);
+		delete writer;
+		delete reader;
+		delete socket;
+	}
+	catch (...)
+	{
+		try
+		{
+			delete socket;
+		}
+		catch (...)
+		{
+		}
+	}
+}
+
+String^ DirectXPage::BuildCommandLine()
+{
+	String^ arch = "x86_64";
+	ComboBoxItem^ selectedArch = dynamic_cast<ComboBoxItem^>(architectureBox->SelectedItem);
+	if (selectedArch != nullptr)
+	{
+		arch = selectedArch->Content->ToString();
+	}
+	std::wstring target(arch->Data());
+	TargetProfile targetProfile = GetTargetProfile(target);
+
+	int memoryMb = static_cast<int>(memorySlider->Value + 0.5);
+
+	StorageFile^ driveFile = m_stagedDriveFile != nullptr ? m_stagedDriveFile : m_selectedDriveFile;
+	StorageFile^ cdromFile = m_stagedCdromFile != nullptr ? m_stagedCdromFile : m_selectedCdromFile;
+	bool canStartDriveServer = m_stagedDriveFile != nullptr;
+	bool canStartCdromServer = m_stagedCdromFile != nullptr;
+	std::wstring command = L"qemu-system-";
+	command += arch->Data();
+	command += L" -libretro";
+	command += targetProfile.machineArgs;
+
+	if (memoryMb > 0)
+	{
+		command += L" -m ";
+		command += std::to_wstring(memoryMb);
+		command += L"M";
+	}
+
+	if (extraArgumentsBox != nullptr && extraArgumentsBox->Text != nullptr && extraArgumentsBox->Text->Length() > 0)
+	{
+		command += L" ";
+		command += extraArgumentsBox->Text->Data();
+	}
+
+	int diagnosticProfile = diagnosticProfileBox != nullptr ? diagnosticProfileBox->SelectedIndex : 0;
+	if (diagnosticProfile == 1)
+	{
+		command += L" -drive if=ide,media=cdrom,readonly=on -boot d";
+	}
+	else if (diagnosticProfile == 2)
+	{
+		command += L" -drive driver=null-co,size=64M,read-zeroes=on,if=ide,media=disk -boot c";
+	}
+	else if (diagnosticProfile == 0)
+	{
+		bool hasBootDevice = false;
+		if (driveFile != nullptr)
+		{
+			std::wstring fileName(driveFile->Name->Data());
+			std::wstring diskFormat = DiskFormatFromFileName(fileName);
+			std::wstring mediaUrl;
+			bool useVirtio = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
+				targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
+				targetProfile.blockStyle == TargetBlockStyle::VirtioCcw;
+			if (canStartDriveServer && EnsureMediaNbdServer(driveFile, false, false, mediaUrl))
+			{
+				command += L" -drive file=";
+				command += QuoteForCommandLine(ref new String(mediaUrl.c_str()))->Data();
+			}
+			else
+			{
+				command += L" -drive file=\"nbd://127.0.0.1:10809\"";
+			}
+			command += L",format=";
+			command += diskFormat;
+			if (useVirtio)
+			{
+				command += L",if=none,id=drive0,media=disk -device ";
+				command += VirtioDevice(targetProfile.blockStyle);
+				command += L",drive=drive0";
+			}
+			else
+			{
+				command += L",if=";
+				command += BlockInterface(targetProfile.blockStyle);
+				command += L",media=disk";
+			}
+			hasBootDevice = true;
+		}
+
+		if (cdromFile != nullptr)
+		{
+			std::wstring mediaUrl;
+			bool useVirtio = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
+				targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
+				targetProfile.blockStyle == TargetBlockStyle::VirtioCcw;
+			if (canStartCdromServer && EnsureMediaNbdServer(cdromFile, true, true, mediaUrl))
+			{
+				command += L" -drive file=";
+				command += QuoteForCommandLine(ref new String(mediaUrl.c_str()))->Data();
+			}
+			else
+			{
+				command += L" -drive file=\"nbd://127.0.0.1:10810\"";
+			}
+			command += L",format=raw";
+			if (useVirtio)
+			{
+				command += L",if=none,id=cdrom0,media=cdrom,readonly=on -device ";
+				command += VirtioDevice(targetProfile.blockStyle);
+				command += L",drive=cdrom0";
+			}
+			else
+			{
+				command += L",if=";
+				command += BlockInterface(targetProfile.blockStyle);
+				command += L",media=cdrom,readonly=on";
+			}
+			hasBootDevice = true;
+		}
+
+		if (hasBootDevice)
+		{
+			command += cdromFile != nullptr ? L" -boot d" : L" -boot c";
+		}
+		else
+		{
+			command += L" -boot c";
+		}
+	}
+	else
+	{
+		command += L" -boot c";
+	}
+
+	return ref new String(command.c_str());
+}
+
+bool DirectXPage::IsCommandLineFile(StorageFile^ file)
+{
+	if (file == nullptr)
+	{
+		return false;
+	}
+
+	std::wstring name(file->Name->Data());
+	return name.length() >= 14 && _wcsicmp(name.c_str() + name.length() - 14, L".qemu_cmd_line") == 0;
+}
+
+String^ DirectXPage::QuoteForCommandLine(String^ value)
+{
+	std::wstring quoted = L"\"";
+	if (value != nullptr)
+	{
+		for (const wchar_t* ch = value->Data(); *ch != L'\0'; ch++)
+		{
+			if (*ch == L'"')
+			{
+				quoted += L"\\\"";
+			}
+			else if (*ch == L'\\')
+			{
+				quoted += L"/";
+			}
+			else
+			{
+				quoted += *ch;
+			}
+		}
+	}
+	quoted += L"\"";
+	return ref new String(quoted.c_str());
+}
+
+void DirectXPage::StartWithCommandFile(StorageFile^ commandFile)
+{
+	if (commandFile == nullptr)
+	{
+		AppendError(L"Could not create current.qemu_cmd_line.");
+		SetStartState(false, false);
+		return;
+	}
+
+	SetStatus(L"Loading qemu_libretro.dll and initializing the core...");
+	auto dispatcher = Dispatcher;
+	m_main->SetProgressCallback(std::function<void(const std::wstring&)>());
+
+	Concurrency::create_task([this, commandFile, dispatcher]()
+	{
+		bool loaded = false;
+		std::wstring message;
+		try
+		{
+			loaded = m_main->LoadGame(commandFile, &message);
+		}
+		catch (Exception^ ex)
+		{
+			message = L"UWP exception while loading the core: ";
+			if (ex != nullptr && ex->Message != nullptr)
+			{
+				message += ex->Message->Data();
+			}
+		}
+		catch (const std::exception&)
+		{
+			message = L"C++ exception while loading the core.";
+		}
+		catch (...)
+		{
+			message = L"Unknown exception while loading the core.";
+		}
+
+		if (loaded)
+		{
+			dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this]()
+			{
+				AppendError(L"Libretro core loaded. Starting execution.");
+				SetStatus(m_main->StatusText());
+				topPanel->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
+				showTabsButton->Label = "Show tabs";
+				bottomAppBar->IsOpen = false;
+				SetStartState(false, true);
+			}));
+
+			m_main->RunLoadedGame();
+			return;
+		}
+
+		auto error = std::make_shared<std::wstring>(message.empty()
+			? L"Failed to load the libretro core. The core returned an error without details."
+			: message);
+		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, error]()
+		{
+			AppendError(*error);
+			SetStatus(*error);
+			tabPanel->SelectedIndex = 1;
+			SetStartState(false, false);
+		}));
+	});
+}
+unsigned DirectXPage::MapVirtualKeyToRetro(VirtualKey key)
+{
+	unsigned keyValue = static_cast<unsigned>(key);
+	if (key >= VirtualKey::Number0 && key <= VirtualKey::Number9)
+	{
+		return static_cast<unsigned>('0') + (keyValue - static_cast<unsigned>(VirtualKey::Number0));
+	}
+	if (key >= VirtualKey::A && key <= VirtualKey::Z)
+	{
+		return static_cast<unsigned>('a') + (keyValue - static_cast<unsigned>(VirtualKey::A));
+	}
+	if (key >= VirtualKey::NumberPad0 && key <= VirtualKey::NumberPad9)
+	{
+		return RETROK_KP0 + (keyValue - static_cast<unsigned>(VirtualKey::NumberPad0));
+	}
+	if (key >= VirtualKey::F1 && key <= VirtualKey::F15)
+	{
+		return RETROK_F1 + (keyValue - static_cast<unsigned>(VirtualKey::F1));
+	}
+
+	switch (key)
+	{
+	case VirtualKey::Back:
+		return RETROK_BACKSPACE;
+	case VirtualKey::Tab:
+		return RETROK_TAB;
+	case VirtualKey::Enter:
+		return RETROK_RETURN;
+	case VirtualKey::Escape:
+		return RETROK_ESCAPE;
+	case VirtualKey::Space:
+		return RETROK_SPACE;
+	case VirtualKey::Pause:
+		return RETROK_PAUSE;
+	case VirtualKey::CapitalLock:
+		return RETROK_CAPSLOCK;
+	case VirtualKey::Scroll:
+		return RETROK_SCROLLOCK;
+	case VirtualKey::NumberKeyLock:
+		return RETROK_NUMLOCK;
+	case VirtualKey::Snapshot:
+		return RETROK_PRINT;
+	case VirtualKey::Delete:
+		return RETROK_DELETE;
+	case VirtualKey::Left:
+		return RETROK_LEFT;
+	case VirtualKey::Right:
+		return RETROK_RIGHT;
+	case VirtualKey::Up:
+		return RETROK_UP;
+	case VirtualKey::Down:
+		return RETROK_DOWN;
+	case VirtualKey::Home:
+		return RETROK_HOME;
+	case VirtualKey::End:
+		return RETROK_END;
+	case VirtualKey::PageUp:
+		return RETROK_PAGEUP;
+	case VirtualKey::PageDown:
+		return RETROK_PAGEDOWN;
+	case VirtualKey::Insert:
+		return RETROK_INSERT;
+	case VirtualKey::Shift:
+	case VirtualKey::LeftShift:
+		return RETROK_LSHIFT;
+	case VirtualKey::RightShift:
+		return RETROK_RSHIFT;
+	case VirtualKey::Control:
+	case VirtualKey::LeftControl:
+		return RETROK_LCTRL;
+	case VirtualKey::RightControl:
+		return RETROK_RCTRL;
+	case VirtualKey::Menu:
+	case VirtualKey::LeftMenu:
+		return RETROK_LALT;
+	case VirtualKey::RightMenu:
+		return RETROK_RALT;
+	case VirtualKey::Multiply:
+		return RETROK_KP_MULTIPLY;
+	case VirtualKey::Add:
+		return RETROK_KP_PLUS;
+	case VirtualKey::Separator:
+		return RETROK_COMMA;
+	case VirtualKey::Subtract:
+		return RETROK_KP_MINUS;
+	case VirtualKey::Decimal:
+		return RETROK_KP_PERIOD;
+	case VirtualKey::Divide:
+		return RETROK_KP_DIVIDE;
+	default:
+		break;
+	}
+
+	switch (keyValue)
+	{
+	case 0xBA:
+		return RETROK_SEMICOLON;
+	case 0xBB:
+		return RETROK_EQUALS;
+	case 0xBC:
+		return RETROK_COMMA;
+	case 0xBD:
+		return RETROK_MINUS;
+	case 0xBE:
+		return RETROK_PERIOD;
+	case 0xBF:
+		return RETROK_SLASH;
+	case 0xC0:
+		return RETROK_BACKQUOTE;
+	case 0xDB:
+		return RETROK_LEFTBRACKET;
+	case 0xDC:
+		return RETROK_BACKSLASH;
+	case 0xDD:
+		return RETROK_RIGHTBRACKET;
+	case 0xDE:
+		return RETROK_QUOTE;
+	case 0xE2:
+		return RETROK_LESS;
+	default:
+		return 0;
+	}
+}
+
+
+
+
+
+
+
+
+
+
