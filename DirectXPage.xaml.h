@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <vector>
 #include <map>
+#include <set>
 
 namespace Qemu_Libretro_UWP
 {
@@ -85,14 +86,16 @@ namespace Qemu_Libretro_UWP
 		void SelectPreparedMedia(Windows::Storage::StorageFile^ file, bool cdromMedia);
 		void RefreshQemuOptionSelectors();
 		void PopulateQemuOptionSelectors();
+		void PopulateProfileOptions();
 		void AddQemuOptionItems(Windows::UI::Xaml::Controls::ComboBox^ box, const wchar_t* defaultText, const std::vector<const wchar_t*>& candidates);
 		bool CoreDllHasAscii(const wchar_t* value);
 		std::wstring SelectedComboValue(Windows::UI::Xaml::Controls::ComboBox^ box);
 		void SelectComboValue(Windows::UI::Xaml::Controls::ComboBox^ box, const wchar_t* value);
 		void SelectArchitectureValue(const wchar_t* value);
-		int SelectedProfileIndex() const;
+		int SelectedProfileId() const;
 		bool IsVideoTestProfile() const;
 		void ApplySelectedProfile();
+		std::wstring CurrentTarget() const;
 		void ResetCommandDefaults();
 		void UpdateCommandPreview();
 		Platform::String^ BuildCommandLine();
@@ -149,11 +152,15 @@ namespace Qemu_Libretro_UWP
 		bool m_updatingBootMediaLists;
 		bool m_updatingBootMediaSize;
 		bool m_updatingQemuOptionLists;
+		bool m_updatingProfileList;
 		bool m_applyingProfile;
 		bool m_coreDllOptionsLoaded;
 		bool m_coreDllOptionsLoading;
 		std::vector<unsigned char> m_coreDllData;
+		std::set<std::string> m_coreDllAsciiTokens;
 		std::map<std::wstring, bool> m_coreDllOptionPresence;
+		std::map<std::wstring, std::map<std::wstring, bool>> m_qemuOptionPresenceByTarget;
+		std::wstring m_currentOptionTarget;
 		bool m_isStarting;
 		bool m_isRunning;
 		bool m_windowVisible;

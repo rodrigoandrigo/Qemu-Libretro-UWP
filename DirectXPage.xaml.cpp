@@ -359,6 +359,51 @@ namespace
 		return result;
 	}
 
+	std::set<std::string> ExtractAsciiTokens(const std::vector<unsigned char>& data)
+	{
+		std::set<std::string> tokens;
+		std::string current;
+		for (unsigned char value : data)
+		{
+			bool tokenChar =
+				(value >= 'a' && value <= 'z') ||
+				(value >= 'A' && value <= 'Z') ||
+				(value >= '0' && value <= '9') ||
+				value == '_' ||
+				value == '-' ||
+				value == '.' ||
+				value == ',';
+			if (tokenChar)
+			{
+				if (current.size() < 96)
+				{
+					current.push_back(static_cast<char>(value));
+				}
+			}
+			else
+			{
+				if (current.size() >= 2)
+				{
+					tokens.insert(current);
+				}
+				current.clear();
+			}
+		}
+		if (current.size() >= 2)
+		{
+			tokens.insert(current);
+		}
+		return tokens;
+	}
+
+	void AppendCandidates(std::vector<const wchar_t*>& target, const std::vector<const wchar_t*>& source)
+	{
+		for (const wchar_t* value : source)
+		{
+			target.push_back(value);
+		}
+	}
+
 	std::vector<const wchar_t*> MachineCandidates(const std::wstring& target)
 	{
 		if (IsAnyTarget(target, { L"x86_64", L"i386" }))
@@ -498,6 +543,70 @@ namespace
 		return value.find(L"net") != std::wstring::npos ||
 			value == L"e1000" ||
 			value == L"rtl8139";
+	}
+
+	enum ProfileId
+	{
+		ProfileNormal = 0,
+		ProfileVideoTest = 1,
+		ProfileLinuxCloudQcow2 = 2,
+		ProfileUbuntu10 = 3,
+		ProfileUbuntu14 = 4,
+		ProfileWindows98 = 5,
+		ProfileWindowsXP = 6,
+		ProfileWindows7 = 7
+	};
+
+	const wchar_t* ProfileName(int profile)
+	{
+		switch (profile)
+		{
+		case ProfileVideoTest:
+			return L"Video Teste";
+		case ProfileLinuxCloudQcow2:
+			return L"Linux cloud qcow2";
+		case ProfileUbuntu10:
+			return L"Ubuntu 10";
+		case ProfileUbuntu14:
+			return L"Ubuntu 14";
+		case ProfileWindows98:
+			return L"Windows 98";
+		case ProfileWindowsXP:
+			return L"Windows XP";
+		case ProfileWindows7:
+			return L"Windows 7";
+		default:
+			return L"Normal command";
+		}
+	}
+
+	int ProfileIdFromName(const std::wstring& name)
+	{
+		for (int profile = ProfileNormal; profile <= ProfileWindows7; profile++)
+		{
+			if (_wcsicmp(name.c_str(), ProfileName(profile)) == 0)
+			{
+				return profile;
+			}
+		}
+		return ProfileNormal;
+	}
+
+	bool IsProfileAvailableForTarget(int profile, const std::wstring& target)
+	{
+		if (profile == ProfileNormal || profile == ProfileVideoTest)
+		{
+			return true;
+		}
+		if (profile == ProfileLinuxCloudQcow2 || profile == ProfileUbuntu14 || profile == ProfileWindows7)
+		{
+			return IsAnyTarget(target, { L"x86_64" });
+		}
+		if (profile == ProfileUbuntu10 || profile == ProfileWindows98 || profile == ProfileWindowsXP)
+		{
+			return IsAnyTarget(target, { L"i386" });
+		}
+		return false;
 	}
 
 	bool IsCoreKeyDown(VirtualKey key)
@@ -673,6 +782,7 @@ DirectXPage::DirectXPage():
 	m_updatingBootMediaLists(false),
 	m_updatingBootMediaSize(false),
 	m_updatingQemuOptionLists(false),
+	m_updatingProfileList(false),
 	m_applyingProfile(false),
 	m_coreDllOptionsLoaded(false),
 	m_coreDllOptionsLoading(false),
@@ -777,6 +887,7 @@ DirectXPage::DirectXPage():
 	SetStatus(m_main->StatusText());
 	m_main->StartRenderLoop();
 	RefreshBootMediaState();
+	PopulateProfileOptions();
 	RefreshQemuOptionSelectors();
 	UpdateCommandPreview();
 }
@@ -1455,6 +1566,8 @@ void DirectXPage::Architecture_Changed(Object^ sender, SelectionChangedEventArgs
 		memorySlider->Value = profile.memoryMb;
 	}
 
+	PopulateProfileOptions();
+	ApplySelectedProfile();
 	RefreshQemuOptionSelectors();
 	RefreshCommandLinePreview();
 }
@@ -1474,6 +1587,10 @@ void DirectXPage::DiagnosticProfile_Changed(Object^ sender, SelectionChangedEven
 {
 	(void)sender;
 	(void)e;
+	if (m_updatingProfileList)
+	{
+		return;
+	}
 	ApplySelectedProfile();
 	RefreshCommandLinePreview();
 }
@@ -2023,9 +2140,9 @@ void DirectXPage::RefreshQemuOptionSelectors()
 	PopulateQemuOptionSelectors();
 	std::wstring dllPath(Package::Current->InstalledLocation->Path->Data());
 	dllPath += L"\\qemu_libretro.dll";
-	auto presence = std::make_shared<std::map<std::wstring, bool>>();
+	auto tokens = std::make_shared<std::set<std::string>>();
 	auto dispatcher = Dispatcher;
-	Concurrency::create_task([dllPath, presence]()
+	Concurrency::create_task([dllPath, tokens]()
 	{
 		CREATEFILE2_EXTENDED_PARAMETERS params = {};
 		params.dwSize = sizeof(params);
@@ -2061,33 +2178,19 @@ void DirectXPage::RefreshQemuOptionSelectors()
 			return;
 		}
 
-		std::set<std::wstring> uniqueCandidates;
-		for (const wchar_t* candidate : AllQemuOptionCandidates())
-		{
-			if (candidate != nullptr)
-			{
-				uniqueCandidates.insert(candidate);
-			}
-		}
-
-		for (const std::wstring& candidate : uniqueCandidates)
-		{
-			std::string narrow = NarrowAscii(candidate);
-			bool found = !narrow.empty() && ContainsTerminatedAscii(data, narrow.c_str(), 0, data.size());
-			(*presence)[candidate] = found;
-		}
-	}).then([this, dispatcher, presence]()
+		*tokens = ExtractAsciiTokens(data);
+	}).then([this, dispatcher, tokens]()
 	{
-		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, presence]()
+		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, tokens]()
 		{
-			if (!presence->empty())
+			if (!tokens->empty())
 			{
-				m_coreDllOptionPresence.swap(*presence);
+				m_coreDllAsciiTokens.swap(*tokens);
 				m_coreDllOptionsLoaded = true;
 			}
 			m_coreDllOptionsLoading = false;
 			PopulateQemuOptionSelectors();
-			if (SelectedProfileIndex() > 0)
+			if (SelectedProfileId() > ProfileNormal)
 			{
 				ApplySelectedProfile();
 			}
@@ -2098,13 +2201,39 @@ void DirectXPage::RefreshQemuOptionSelectors()
 
 void DirectXPage::PopulateQemuOptionSelectors()
 {
-	String^ arch = "x86_64";
-	ComboBoxItem^ selectedArch = architectureBox != nullptr ? dynamic_cast<ComboBoxItem^>(architectureBox->SelectedItem) : nullptr;
-	if (selectedArch != nullptr)
+	std::wstring target = CurrentTarget();
+	m_currentOptionTarget = target;
+
+	if (m_coreDllOptionsLoaded && m_qemuOptionPresenceByTarget.find(target) == m_qemuOptionPresenceByTarget.end())
 	{
-		arch = selectedArch->Content->ToString();
+		std::vector<const wchar_t*> candidates;
+		AppendCandidates(candidates, MachineCandidates(target));
+		AppendCandidates(candidates, CpuCandidates(target));
+		AppendCandidates(candidates, DeviceCandidates(target));
+		AppendCandidates(candidates, VgaCandidates(target));
+		AppendCandidates(candidates, MonitorCandidates());
+		AppendCandidates(candidates, NetdevCandidates());
+
+		std::map<std::wstring, bool> targetPresence;
+		for (const wchar_t* candidate : candidates)
+		{
+			if (candidate == nullptr)
+			{
+				continue;
+			}
+
+			std::wstring wide(candidate);
+			if (targetPresence.find(wide) != targetPresence.end())
+			{
+				continue;
+			}
+
+			std::string narrow = NarrowAscii(wide);
+			targetPresence[wide] = !narrow.empty() &&
+				m_coreDllAsciiTokens.find(narrow) != m_coreDllAsciiTokens.end();
+		}
+		m_qemuOptionPresenceByTarget[target] = targetPresence;
 	}
-	std::wstring target(arch->Data());
 
 	m_updatingQemuOptionLists = true;
 	AddQemuOptionItems(machineBox, m_coreDllOptionsLoaded ? L"Default machine" : L"Loading machines...", MachineCandidates(target));
@@ -2156,8 +2285,14 @@ bool DirectXPage::CoreDllHasAscii(const wchar_t* value)
 		return false;
 	}
 
-	auto found = m_coreDllOptionPresence.find(value);
-	return found != m_coreDllOptionPresence.end() && found->second;
+	auto targetCache = m_qemuOptionPresenceByTarget.find(m_currentOptionTarget);
+	if (targetCache == m_qemuOptionPresenceByTarget.end())
+	{
+		return false;
+	}
+
+	auto found = targetCache->second.find(value);
+	return found != targetCache->second.end() && found->second;
 }
 
 std::wstring DirectXPage::SelectedComboValue(ComboBox^ box)
@@ -2221,14 +2356,53 @@ void DirectXPage::SelectArchitectureValue(const wchar_t* value)
 	}
 }
 
-int DirectXPage::SelectedProfileIndex() const
+std::wstring DirectXPage::CurrentTarget() const
 {
-	return diagnosticProfileBox != nullptr ? diagnosticProfileBox->SelectedIndex : 0;
+	ComboBoxItem^ selectedArch = architectureBox != nullptr ? dynamic_cast<ComboBoxItem^>(architectureBox->SelectedItem) : nullptr;
+	return selectedArch != nullptr ? std::wstring(selectedArch->Content->ToString()->Data()) : std::wstring(L"x86_64");
+}
+
+int DirectXPage::SelectedProfileId() const
+{
+	ComboBoxItem^ selectedProfile = diagnosticProfileBox != nullptr ? dynamic_cast<ComboBoxItem^>(diagnosticProfileBox->SelectedItem) : nullptr;
+	String^ content = selectedProfile != nullptr ? selectedProfile->Content->ToString() : nullptr;
+	return content != nullptr ? ProfileIdFromName(content->Data()) : ProfileNormal;
 }
 
 bool DirectXPage::IsVideoTestProfile() const
 {
-	return SelectedProfileIndex() == 1;
+	return SelectedProfileId() == ProfileVideoTest;
+}
+
+void DirectXPage::PopulateProfileOptions()
+{
+	if (diagnosticProfileBox == nullptr)
+	{
+		return;
+	}
+
+	int previousProfile = SelectedProfileId();
+	std::wstring target = CurrentTarget();
+	m_updatingProfileList = true;
+	diagnosticProfileBox->Items->Clear();
+	int selectedIndex = 0;
+	for (int profile = ProfileNormal; profile <= ProfileWindows7; profile++)
+	{
+		if (!IsProfileAvailableForTarget(profile, target))
+		{
+			continue;
+		}
+
+		ComboBoxItem^ item = ref new ComboBoxItem();
+		item->Content = ref new String(ProfileName(profile));
+		diagnosticProfileBox->Items->Append(item);
+		if (profile == previousProfile)
+		{
+			selectedIndex = static_cast<int>(diagnosticProfileBox->Items->Size) - 1;
+		}
+	}
+	diagnosticProfileBox->SelectedIndex = selectedIndex;
+	m_updatingProfileList = false;
 }
 
 void DirectXPage::ApplySelectedProfile()
@@ -2239,7 +2413,8 @@ void DirectXPage::ApplySelectedProfile()
 	}
 
 	m_applyingProfile = true;
-	int profile = SelectedProfileIndex();
+	int profile = SelectedProfileId();
+	std::wstring currentTarget = CurrentTarget();
 	const wchar_t* arch = nullptr;
 	int memoryMb = -1;
 	const wchar_t* machine = nullptr;
@@ -2253,16 +2428,15 @@ void DirectXPage::ApplySelectedProfile()
 	switch (profile)
 	{
 	case 0: // Normal command
-		arch = L"x86_64";
-		memoryMb = GetTargetProfile(L"x86_64").memoryMb;
+		memoryMb = GetTargetProfile(currentTarget).memoryMb;
 		bootDevice = 0;
 		break;
 	case 1: // Video Teste
-		arch = L"x86_64";
-		memoryMb = 256;
-		machine = L"pc";
-		cpu = L"qemu64";
-		vga = L"std";
+		memoryMb = (std::min)(GetTargetProfile(currentTarget).memoryMb, 512);
+		if (memoryMb <= 0)
+		{
+			memoryMb = 256;
+		}
 		monitor = L"none";
 		bootDevice = 1;
 		break;
