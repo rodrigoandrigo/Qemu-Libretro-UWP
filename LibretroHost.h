@@ -30,7 +30,10 @@ namespace Qemu_Libretro_UWP
 
 		bool LoadGame(Windows::Storage::StorageFile^ file, std::wstring* error);
 		void RunLoadedGame();
-		void Stop();
+		bool Pause();
+		bool Resume();
+		bool Stop();
+		bool Shutdown();
 		void Reset();
 		void SetProgressCallback(std::function<void(const std::wstring&)> callback);
 		void SetKey(unsigned retroKey, bool pressed);
@@ -61,6 +64,7 @@ namespace Qemu_Libretro_UWP
 		int16_t OnInputState(unsigned port, unsigned device, unsigned index, unsigned id);
 		void RunLoop(Windows::Foundation::IAsyncAction^ action);
 		void StartRunLoop();
+		bool WaitForRunLoopToStop(unsigned timeoutMs);
 		void SetStatus(const std::wstring& text);
 		void Trace(const std::wstring& text);
 		static void InstallProcessDiagnostics();
@@ -73,6 +77,7 @@ namespace Qemu_Libretro_UWP
 
 		LibretroCore m_core;
 		std::atomic<bool> m_running;
+		std::atomic<bool> m_paused;
 		std::atomic<bool> m_waitingForFirstRun;
 		Windows::Foundation::IAsyncAction^ m_worker;
 

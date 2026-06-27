@@ -25,6 +25,10 @@ namespace Qemu_Libretro_UWP
 		void StopRenderLoop();
 		bool LoadGame(Windows::Storage::StorageFile^ file, std::wstring* error);
 		void RunLoadedGame();
+		bool PauseEmulator();
+		bool ResumeEmulator();
+		bool StopEmulator();
+		bool ShutdownEmulator();
 		void ResetCore();
 		void SetProgressCallback(std::function<void(const std::wstring&)> callback);
 		void SetKey(unsigned retroKey, bool pressed);

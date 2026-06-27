@@ -29,19 +29,7 @@ LibretroCore::LibretroCore() :
 
 LibretroCore::~LibretroCore()
 {
-	if (m_gameLoaded)
-	{
-		UnloadGame();
-	}
-	if (m_initialized)
-	{
-		Deinit();
-	}
-	if (m_module)
-	{
-		FreeLibrary(m_module);
-		m_module = nullptr;
-	}
+	UnloadCore();
 }
 
 bool LibretroCore::Load(std::wstring* error)
@@ -160,9 +148,39 @@ void LibretroCore::UnloadGame()
 	}
 }
 
+void LibretroCore::UnloadCore()
+{
+	UnloadGame();
+	Deinit();
+	if (m_module)
+	{
+		FreeLibrary(m_module);
+		m_module = nullptr;
+	}
+
+	m_retro_set_environment = nullptr;
+	m_retro_set_video_refresh = nullptr;
+	m_retro_set_audio_sample = nullptr;
+	m_retro_set_audio_sample_batch = nullptr;
+	m_retro_set_input_poll = nullptr;
+	m_retro_set_input_state = nullptr;
+	m_retro_init = nullptr;
+	m_retro_deinit = nullptr;
+	m_retro_api_version = nullptr;
+	m_retro_get_system_info = nullptr;
+	m_retro_get_system_av_info = nullptr;
+	m_retro_load_game = nullptr;
+	m_retro_unload_game = nullptr;
+	m_retro_run = nullptr;
+	m_retro_reset = nullptr;
+}
+
 void LibretroCore::Run()
 {
-	m_retro_run();
+	if (m_gameLoaded && m_retro_run != nullptr)
+	{
+		m_retro_run();
+	}
 }
 
 void LibretroCore::Reset()

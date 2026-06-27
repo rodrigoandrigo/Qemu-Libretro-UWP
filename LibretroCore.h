@@ -29,6 +29,7 @@ namespace Qemu_Libretro_UWP
 		void Deinit();
 		bool LoadGame(const retro_game_info* game);
 		void UnloadGame();
+		void UnloadCore();
 		void Run();
 		void Reset();
 		void GetSystemInfo(retro_system_info* info);
@@ -59,4 +60,3 @@ namespace Qemu_Libretro_UWP
 		void (*m_retro_reset)();
 	};
 }
-

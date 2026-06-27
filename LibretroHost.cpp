@@ -28,6 +28,7 @@ static std::wstring g_processDiagnosticLogPath;
 
 LibretroHost::LibretroHost() :
 	m_running(false),
+	m_paused(false),
 	m_waitingForFirstRun(false),
 	m_worker(nullptr),
 	m_frameWidth(0),
@@ -94,7 +95,14 @@ bool LibretroHost::LoadGame(StorageFile^ file, std::wstring* error)
 	}
 
 	Trace(L"Host: stopping previous instance.");
-	Stop();
+	if (!Stop())
+	{
+		if (error)
+		{
+			*error = L"Previous emulator instance did not stop cleanly. Use Shutdown or restart the app before starting another emulator.";
+		}
+		return false;
+	}
 	s_activeHost = this;
 
 	Trace(L"Host: loading qemu_libretro.dll.");
@@ -161,19 +169,76 @@ bool LibretroHost::LoadGame(StorageFile^ file, std::wstring* error)
 	}
 	SetStatus(status);
 	m_running = true;
+	m_paused = false;
 	Trace(L"Host: LoadGame completed.");
 	return true;
 }
 
-void LibretroHost::Stop()
+bool LibretroHost::Pause()
+{
+	if (!m_running)
+	{
+		return false;
+	}
+	m_paused = true;
+	SetStatus(L"Emulator paused.");
+	Trace(L"Host: pause requested.");
+	return true;
+}
+
+bool LibretroHost::Resume()
+{
+	if (!m_running)
+	{
+		return false;
+	}
+	m_paused = false;
+	Trace(L"Host: resume requested.");
+	StartRunLoop();
+	SetStatus(L"Emulator resumed.");
+	return true;
+}
+
+bool LibretroHost::Stop()
 {
 	m_running = false;
-	if (m_worker != nullptr)
+	m_paused = false;
+	if (!WaitForRunLoopToStop(3000))
 	{
-		m_worker->Cancel();
-		m_worker = nullptr;
+		SetStatus(L"Stop requested, but the emulator core is still busy.");
+		Trace(L"Host: stop timed out while waiting for retro_run to return.");
+		return false;
 	}
 	m_core.UnloadGame();
+	m_core.Deinit();
+	if (s_activeHost == this)
+	{
+		s_activeHost = nullptr;
+	}
+	SetStatus(L"Emulator stopped.");
+	Trace(L"Host: stopped and deinitialized.");
+	return true;
+}
+
+bool LibretroHost::Shutdown()
+{
+	m_running = false;
+	m_paused = false;
+	if (!WaitForRunLoopToStop(3000))
+	{
+		SetStatus(L"Shutdown requested, but the emulator core is still busy.");
+		Trace(L"Host: shutdown timed out while waiting for retro_run to return.");
+		return false;
+	}
+	m_core.UnloadGame();
+	m_core.Deinit();
+	if (s_activeHost == this)
+	{
+		s_activeHost = nullptr;
+	}
+	SetStatus(L"Emulator core stopped.");
+	Trace(L"Host: core stopped and deinitialized.");
+	return true;
 }
 
 void LibretroHost::Reset()
@@ -221,6 +286,11 @@ void LibretroHost::RunLoop(IAsyncAction^ action)
 	bool firstFrame = true;
 	while (m_running && (action == nullptr || action->Status == Windows::Foundation::AsyncStatus::Started))
 	{
+		if (m_paused)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(16));
+			continue;
+		}
 		m_runLoopCount++;
 		if (firstFrame)
 		{
@@ -258,6 +328,29 @@ void LibretroHost::RunLoop(IAsyncAction^ action)
 				static_cast<int>((std::min)(m_frameDelayMs, 16.0))));
 		}
 	}
+}
+
+bool LibretroHost::WaitForRunLoopToStop(unsigned timeoutMs)
+{
+	if (m_worker == nullptr)
+	{
+		return true;
+	}
+
+	unsigned elapsed = 0;
+	while (m_worker->Status == Windows::Foundation::AsyncStatus::Started && elapsed < timeoutMs)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		elapsed += 10;
+	}
+
+	if (m_worker->Status == Windows::Foundation::AsyncStatus::Started)
+	{
+		return false;
+	}
+
+	m_worker = nullptr;
+	return true;
 }
 
 void LibretroHost::SetKey(unsigned retroKey, bool pressed)

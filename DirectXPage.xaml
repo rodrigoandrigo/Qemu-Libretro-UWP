@@ -35,7 +35,7 @@
       <CommandBar.Content>
         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
           <FontIcon Glyph="&#xE768;" Foreground="{StaticResource AccentBrush}" FontSize="22" />
-          <StackPanel>
+          <StackPanel MaxWidth="720">
             <TextBlock Text="QEMU Libretro UWP" Foreground="White" FontWeight="SemiBold" />
             <TextBlock
                 x:Name="statusText"
@@ -54,6 +54,10 @@
       <CommandBar.PrimaryCommands>
         <AppBarButton x:Name="showTabsButton" Icon="Setting" Label="Hide tabs" Click="ShowTabsButton_Click" Foreground="White" />
         <AppBarButton x:Name="startButton" Icon="Play" Label="Start" Click="StartButton_Click" Foreground="White" />
+        <AppBarButton x:Name="pauseButton" Icon="Pause" Label="Pause" Click="PauseButton_Click" Foreground="White" IsEnabled="False" />
+        <AppBarButton x:Name="resumeButton" Icon="Play" Label="Resume" Click="ResumeButton_Click" Foreground="White" IsEnabled="False" />
+        <AppBarButton x:Name="stopButton" Icon="Stop" Label="Stop" Click="StopButton_Click" Foreground="White" IsEnabled="False" />
+        <AppBarButton x:Name="shutdownButton" Icon="Cancel" Label="Shutdown" Click="ShutdownButton_Click" Foreground="White" IsEnabled="False" />
       </CommandBar.PrimaryCommands>
     </CommandBar>
 
@@ -120,7 +124,7 @@
                       </Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="CD-ROM media" Foreground="White" FontWeight="SemiBold" />
-                        <TextBlock Text="ISO mounted with -cdrom via NBD" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
+                        <TextBlock Text="ISO mounted as media=cdrom via NBD" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
                       </StackPanel>
                       <StackPanel Grid.Column="1" Spacing="6" Margin="12,0" VerticalAlignment="Center">
                         <TextBlock x:Name="selectedCdromText" Text="No CD-ROM selected" Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" />
@@ -146,6 +150,117 @@
                         <Button x:Name="clearBootMediaButton" Content="Clear boot_media" Click="ClearBootMediaButton_Click" />
                       </StackPanel>
                     </Grid>
+
+                    <TextBlock Text="DRIVE OPTIONS" Foreground="White" FontWeight="SemiBold" />
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="driveFormatBox" Grid.Column="0" Header="Format" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto" />
+                        <ComboBoxItem Content="raw" Tag="raw" />
+                        <ComboBoxItem Content="qcow2" Tag="qcow2" />
+                        <ComboBoxItem Content="qcow" Tag="qcow" />
+                        <ComboBoxItem Content="qed" Tag="qed" />
+                        <ComboBoxItem Content="vdi" Tag="vdi" />
+                        <ComboBoxItem Content="vmdk" Tag="vmdk" />
+                        <ComboBoxItem Content="vpc / VHD" Tag="vpc" />
+                        <ComboBoxItem Content="vhdx" Tag="vhdx" />
+                        <ComboBoxItem Content="dmg" Tag="dmg" />
+                        <ComboBoxItem Content="bochs" Tag="bochs" />
+                        <ComboBoxItem Content="cloop" Tag="cloop" />
+                        <ComboBoxItem Content="parallels / HDS" Tag="parallels" />
+                      </ComboBox>
+                      <ComboBox x:Name="driveInterfaceBox" Grid.Column="1" Header="Interface" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto" />
+                        <ComboBoxItem Content="IDE" Tag="ide" />
+                        <ComboBoxItem Content="SCSI" Tag="scsi" />
+                        <ComboBoxItem Content="VirtIO" Tag="virtio" />
+                        <ComboBoxItem Content="USB" Tag="usb" />
+                      </ComboBox>
+                      <ComboBox x:Name="driveCacheBox" Grid.Column="2" Header="Cache" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="none" Tag="none" />
+                        <ComboBoxItem Content="writeback" Tag="writeback" />
+                        <ComboBoxItem Content="writethrough" Tag="writethrough" />
+                        <ComboBoxItem Content="directsync" Tag="directsync" />
+                        <ComboBoxItem Content="unsafe" Tag="unsafe" />
+                      </ComboBox>
+                      <ComboBox x:Name="driveAioBox" Grid.Column="3" Header="AIO" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="threads" Tag="threads" />
+                        <ComboBoxItem Content="native" Tag="native" />
+                      </ComboBox>
+                    </Grid>
+
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="driveDiscardBox" Grid.Column="0" Header="Discard" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="unmap" Tag="unmap" />
+                        <ComboBoxItem Content="ignore" Tag="ignore" />
+                      </ComboBox>
+                      <ComboBox x:Name="driveSnapshotBox" Grid.Column="1" Header="Snapshot" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="On" Tag="on" />
+                        <ComboBoxItem Content="Off" Tag="off" />
+                      </ComboBox>
+                      <ComboBox x:Name="driveReadonlyBox" Grid.Column="2" Header="Readonly" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="On" Tag="on" />
+                        <ComboBoxItem Content="Off" Tag="off" />
+                      </ComboBox>
+                    </Grid>
+
+                    <TextBlock Text="CD-ROM OPTIONS" Foreground="White" FontWeight="SemiBold" />
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="cdromFormatBox" Grid.Column="0" Header="Format" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto / raw" />
+                        <ComboBoxItem Content="raw" Tag="raw" />
+                        <ComboBoxItem Content="qcow" Tag="qcow" />
+                        <ComboBoxItem Content="qcow2" Tag="qcow2" />
+                        <ComboBoxItem Content="qed" Tag="qed" />
+                        <ComboBoxItem Content="vdi" Tag="vdi" />
+                        <ComboBoxItem Content="vmdk" Tag="vmdk" />
+                        <ComboBoxItem Content="vpc / VHD" Tag="vpc" />
+                        <ComboBoxItem Content="vhdx" Tag="vhdx" />
+                        <ComboBoxItem Content="dmg" Tag="dmg" />
+                        <ComboBoxItem Content="bochs" Tag="bochs" />
+                        <ComboBoxItem Content="cloop" Tag="cloop" />
+                        <ComboBoxItem Content="parallels / HDS" Tag="parallels" />
+                      </ComboBox>
+                      <ComboBox x:Name="cdromInterfaceBox" Grid.Column="1" Header="Interface" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto" />
+                        <ComboBoxItem Content="IDE" Tag="ide" />
+                        <ComboBoxItem Content="SCSI" Tag="scsi" />
+                        <ComboBoxItem Content="VirtIO" Tag="virtio" />
+                        <ComboBoxItem Content="USB" Tag="usb" />
+                      </ComboBox>
+                      <ComboBox x:Name="cdromCacheBox" Grid.Column="2" Header="Cache" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="none" Tag="none" />
+                        <ComboBoxItem Content="writeback" Tag="writeback" />
+                        <ComboBoxItem Content="writethrough" Tag="writethrough" />
+                      </ComboBox>
+                      <ComboBox x:Name="cdromAioBox" Grid.Column="3" Header="AIO" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="threads" Tag="threads" />
+                        <ComboBoxItem Content="native" Tag="native" />
+                      </ComboBox>
+                    </Grid>
                   </StackPanel>
                 </Border>
 
@@ -154,25 +269,43 @@
                   <StackPanel Spacing="12">
                     <StackPanel Spacing="4">
                       <TextBlock Text="Architecture" Foreground="White" FontWeight="SemiBold" />
-                      <ComboBox x:Name="architectureBox" Header="QEMU target" SelectedIndex="0" Width="220" HorizontalAlignment="Left" SelectionChanged="Architecture_Changed">
-                        <ComboBoxItem Content="x86_64" />
-                        <ComboBoxItem Content="i386" />
-                        <ComboBoxItem Content="aarch64" />
-                        <ComboBoxItem Content="alpha" />
-                        <ComboBoxItem Content="arm" />
-                        <ComboBoxItem Content="m68k" />
-                        <ComboBoxItem Content="mips" />
-                        <ComboBoxItem Content="mips64" />
-                        <ComboBoxItem Content="mips64el" />
-                        <ComboBoxItem Content="mipsel" />
-                        <ComboBoxItem Content="ppc" />
-                        <ComboBoxItem Content="ppc64" />
-                        <ComboBoxItem Content="riscv32" />
-                        <ComboBoxItem Content="riscv64" />
-                        <ComboBoxItem Content="s390x" />
-                        <ComboBoxItem Content="sparc" />
-                        <ComboBoxItem Content="sparc64" />
-                      </ComboBox>
+                      <StackPanel Orientation="Horizontal" Spacing="18" VerticalAlignment="Center">
+                        <ComboBox x:Name="architectureBox" Header="QEMU target" SelectedIndex="0" Width="220" HorizontalAlignment="Left" SelectionChanged="Architecture_Changed">
+                          <ComboBoxItem Content="x86_64" />
+                          <ComboBoxItem Content="i386" />
+                          <ComboBoxItem Content="aarch64" />
+                          <ComboBoxItem Content="alpha" />
+                          <ComboBoxItem Content="arm" />
+                          <ComboBoxItem Content="m68k" />
+                          <ComboBoxItem Content="mips" />
+                          <ComboBoxItem Content="mips64" />
+                          <ComboBoxItem Content="mips64el" />
+                          <ComboBoxItem Content="mipsel" />
+                          <ComboBoxItem Content="ppc" />
+                          <ComboBoxItem Content="ppc64" />
+                          <ComboBoxItem Content="riscv32" />
+                          <ComboBoxItem Content="riscv64" />
+                          <ComboBoxItem Content="s390x" />
+                          <ComboBoxItem Content="sparc" />
+                          <ComboBoxItem Content="sparc64" />
+                        </ComboBox>
+                        <StackPanel x:Name="selectorLoadProgressPanel" Width="220" VerticalAlignment="Bottom" Visibility="Collapsed">
+                          <TextBlock
+                              x:Name="selectorLoadProgressText"
+                              Text="0%"
+                              Foreground="{StaticResource MutedTextBrush}"
+                              FontSize="11"
+                              TextAlignment="Right" />
+                          <ProgressBar
+                              x:Name="selectorLoadProgressBar"
+                              Minimum="0"
+                              Maximum="100"
+                              Value="0"
+                              Height="3"
+                              Foreground="{StaticResource AccentBrush}"
+                              Background="#663F3F46" />
+                        </StackPanel>
+                      </StackPanel>
                     </StackPanel>
 
                     <StackPanel Spacing="4">
@@ -187,6 +320,55 @@
                       </Grid>
                       <TextBlock Text="0 MB uses the QEMU default. Values above 0 are written as -m XM." Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                      <TextBlock Text="SMP" Foreground="White" FontWeight="SemiBold" />
+                      <Grid>
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="120" />
+                        </Grid.ColumnDefinitions>
+                        <Slider x:Name="smpSlider" Minimum="1" Maximum="16" Value="1" StepFrequency="1" TickFrequency="4" Foreground="{StaticResource AccentBrush}" ValueChanged="SmpSlider_ValueChanged" />
+                        <TextBlock x:Name="smpValueText" Grid.Column="1" Text="1 CPU" Foreground="White" FontWeight="SemiBold" TextAlignment="Right" VerticalAlignment="Center" />
+                      </Grid>
+                      <TextBlock Text="Written as -smp N. The default startup value is 1 CPU." Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
+                    </StackPanel>
+
+                    <TextBlock Text="BOOT OPTIONS" Foreground="White" FontWeight="SemiBold" />
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="bootOrderBox" Grid.Column="0" Header="Boot order" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto" />
+                        <ComboBoxItem Content="Drive first" Tag="c" />
+                        <ComboBoxItem Content="CD-ROM first" Tag="d" />
+                        <ComboBoxItem Content="Network first" Tag="n" />
+                        <ComboBoxItem Content="Floppy first" Tag="a" />
+                        <ComboBoxItem Content="CD-ROM then Drive" Tag="dc" />
+                        <ComboBoxItem Content="Drive then CD-ROM" Tag="cd" />
+                      </ComboBox>
+                      <ComboBox x:Name="bootMenuBox" Grid.Column="1" Header="Boot menu" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="On" Tag="on" />
+                        <ComboBoxItem Content="Off" Tag="off" />
+                      </ComboBox>
+                      <ComboBox x:Name="bootStrictBox" Grid.Column="2" Header="Strict boot" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="On" Tag="on" />
+                        <ComboBoxItem Content="Off" Tag="off" />
+                      </ComboBox>
+                      <ComboBox x:Name="bootOnceBox" Grid.Column="3" Header="Boot once" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="None" />
+                        <ComboBoxItem Content="Drive" Tag="c" />
+                        <ComboBoxItem Content="CD-ROM" Tag="d" />
+                        <ComboBoxItem Content="Network" Tag="n" />
+                        <ComboBoxItem Content="Floppy" Tag="a" />
+                      </ComboBox>
+                    </Grid>
 
                     <Grid>
                       <Grid.ColumnDefinitions>
@@ -208,6 +390,156 @@
                       <ComboBox x:Name="deviceBox" Grid.Column="0" Header="Device" Margin="0,0,8,0" SelectionChanged="QemuOption_Changed" />
                       <ComboBox x:Name="monitorBox" Grid.Column="1" Header="Monitor" Margin="4,0,4,0" SelectionChanged="QemuOption_Changed" />
                       <ComboBox x:Name="netdevBox" Grid.Column="2" Header="Netdev" Margin="8,0,0,0" SelectionChanged="QemuOption_Changed" />
+                    </Grid>
+
+                    <TextBlock Text="DEVICE OPTIONS" Foreground="White" FontWeight="SemiBold" />
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="audioDeviceBox" Grid.Column="0" Header="Audio device" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="None" />
+                        <ComboBoxItem Content="AC97" Tag="AC97" />
+                        <ComboBoxItem Content="Intel HDA" Tag="intel-hda" />
+                        <ComboBoxItem Content="ES1370" Tag="ES1370" />
+                        <ComboBoxItem Content="SB16" Tag="sb16" />
+                        <ComboBoxItem Content="PC speaker" Tag="pcspk" />
+                      </ComboBox>
+                      <ComboBox x:Name="usbModeBox" Grid.Column="1" Header="USB" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="Enable USB" Tag="on" />
+                        <ComboBoxItem Content="Disable USB" Tag="off" />
+                        <ComboBoxItem Content="EHCI controller" Tag="ehci" />
+                        <ComboBoxItem Content="XHCI controller" Tag="xhci" />
+                      </ComboBox>
+                      <ComboBox x:Name="inputDeviceBox" Grid.Column="2" Header="Input device" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="USB tablet" Tag="usb-tablet" />
+                        <ComboBoxItem Content="USB mouse" Tag="usb-mouse" />
+                        <ComboBoxItem Content="USB keyboard" Tag="usb-kbd" />
+                        <ComboBoxItem Content="Tablet + keyboard" Tag="usb-tablet,usb-kbd" />
+                      </ComboBox>
+                    </Grid>
+
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="rtcBaseBox" Grid.Column="0" Header="RTC base" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="UTC" Tag="utc" />
+                        <ComboBoxItem Content="Local time" Tag="localtime" />
+                      </ComboBox>
+                      <ComboBox x:Name="rtcClockBox" Grid.Column="1" Header="RTC clock" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="host" Tag="host" />
+                        <ComboBoxItem Content="vm" Tag="vm" />
+                      </ComboBox>
+                      <ComboBox x:Name="debugBehaviorBox" Grid.Column="2" Header="Runtime behavior" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="No reboot" Tag="-no-reboot" />
+                        <ComboBoxItem Content="No shutdown" Tag="-no-shutdown" />
+                        <ComboBoxItem Content="No reboot + no shutdown" Tag="-no-reboot -no-shutdown" />
+                      </ComboBox>
+                    </Grid>
+
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="serialBox" Grid.Column="0" Header="Serial" SelectedIndex="0" Margin="0,0,8,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="none" Tag="none" />
+                        <ComboBoxItem Content="null" Tag="null" />
+                        <ComboBoxItem Content="vc" Tag="vc" />
+                        <ComboBoxItem Content="mon:stdio" Tag="mon:stdio" />
+                      </ComboBox>
+                      <ComboBox x:Name="parallelBox" Grid.Column="1" Header="Parallel" SelectedIndex="0" Margin="4,0,4,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="none" Tag="none" />
+                        <ComboBoxItem Content="null" Tag="null" />
+                      </ComboBox>
+                      <ComboBox x:Name="debugFlagsBox" Grid.Column="2" Header="Debug flags" SelectedIndex="0" Margin="8,0,0,0" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Default" />
+                        <ComboBoxItem Content="guest_errors" Tag="guest_errors" />
+                        <ComboBoxItem Content="unimp" Tag="unimp" />
+                        <ComboBoxItem Content="cpu_reset" Tag="cpu_reset" />
+                        <ComboBoxItem Content="guest_errors + unimp" Tag="guest_errors,unimp" />
+                      </ComboBox>
+                    </Grid>
+
+                    <TextBlock Text="FIRMWARE AND DIRECT KERNEL BOOT" Foreground="White" FontWeight="SemiBold" />
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,8,0" Spacing="6">
+                        <ComboBox x:Name="biosPathSelectorBox" Header="BIOS / firmware selector" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="FirmwarePathSelector_SelectionChanged" />
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBox x:Name="biosPathBox" Header="BIOS / firmware path" PlaceholderText="bios.bin or firmware.fd" TextWrapping="NoWrap" TextChanged="BootOptionText_Changed" />
+                          <AppBarButton x:Name="clearBiosPathButton" Grid.Column="1" Icon="Cancel" Label="Clear" Click="ClearFirmwarePathButton_Click" Foreground="White" Margin="6,24,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Margin="8,0,0,0" Spacing="6">
+                        <ComboBox x:Name="kernelPathSelectorBox" Header="Kernel selector" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="FirmwarePathSelector_SelectionChanged" />
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBox x:Name="kernelPathBox" Header="Kernel path" PlaceholderText="vmlinuz or kernel image" TextWrapping="NoWrap" TextChanged="BootOptionText_Changed" />
+                          <AppBarButton x:Name="clearKernelPathButton" Grid.Column="1" Icon="Cancel" Label="Clear" Click="ClearFirmwarePathButton_Click" Foreground="White" Margin="6,24,0,0" />
+                        </Grid>
+                      </StackPanel>
+                    </Grid>
+
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Margin="0,0,8,0" Spacing="6">
+                        <ComboBox x:Name="initrdPathSelectorBox" Header="Initrd selector" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="FirmwarePathSelector_SelectionChanged" />
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBox x:Name="initrdPathBox" Header="Initrd path" PlaceholderText="initrd.img" TextWrapping="NoWrap" TextChanged="BootOptionText_Changed" />
+                          <AppBarButton x:Name="clearInitrdPathButton" Grid.Column="1" Icon="Cancel" Label="Clear" Click="ClearFirmwarePathButton_Click" Foreground="White" Margin="6,24,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Margin="4,0,4,0" Spacing="6">
+                        <ComboBox x:Name="dtbPathSelectorBox" Header="DTB selector" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="FirmwarePathSelector_SelectionChanged" />
+                        <Grid>
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                          </Grid.ColumnDefinitions>
+                          <TextBox x:Name="dtbPathBox" Header="DTB path" PlaceholderText="board.dtb" TextWrapping="NoWrap" TextChanged="BootOptionText_Changed" />
+                          <AppBarButton x:Name="clearDtbPathButton" Grid.Column="1" Icon="Cancel" Label="Clear" Click="ClearFirmwarePathButton_Click" Foreground="White" Margin="6,24,0,0" />
+                        </Grid>
+                      </StackPanel>
+                      <Grid Grid.Column="2" Margin="8,0,0,0">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*" />
+                          <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="kernelAppendBox" Header="Kernel append" PlaceholderText="root=/dev/vda1 console=ttyS0" TextWrapping="NoWrap" TextChanged="BootOptionText_Changed" />
+                        <AppBarButton x:Name="clearKernelAppendButton" Grid.Column="1" Icon="Cancel" Label="Clear" Click="ClearFirmwarePathButton_Click" Foreground="White" Margin="6,24,0,0" />
+                      </Grid>
                     </Grid>
 
                     <StackPanel Spacing="4">
@@ -284,7 +616,7 @@
                   <TextBlock Text="Runtime and configuration problems are collected here." Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                  <Button x:Name="detectTargetsButton" Content="Detect supported systems" Click="DetectTargetsButton_Click" IsEnabled="False" />
+                  <Button x:Name="clearErrorLogButton" Content="Clear errors and logs" Click="ClearErrorLogButton_Click" />
                 </StackPanel>
                 <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource SectionLineBrush}" BorderThickness="1" Padding="12">
                   <TextBox x:Name="errorLogBox" Text="No errors recorded." IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" MinHeight="260" HorizontalAlignment="Stretch" />

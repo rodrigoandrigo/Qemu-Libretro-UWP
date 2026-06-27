@@ -119,6 +119,26 @@ void Qemu_Libretro_UWPMain::RunLoadedGame()
 	m_host.RunLoadedGame();
 }
 
+bool Qemu_Libretro_UWPMain::PauseEmulator()
+{
+	return m_host.Pause();
+}
+
+bool Qemu_Libretro_UWPMain::ResumeEmulator()
+{
+	return m_host.Resume();
+}
+
+bool Qemu_Libretro_UWPMain::StopEmulator()
+{
+	return m_host.Stop();
+}
+
+bool Qemu_Libretro_UWPMain::ShutdownEmulator()
+{
+	return m_host.Shutdown();
+}
+
 void Qemu_Libretro_UWPMain::ResetCore()
 {
 	m_host.Reset();

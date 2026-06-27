@@ -304,7 +304,58 @@ namespace
 
 	bool IsCdromMediaName(const std::wstring& name)
 	{
-		return HasExtension(name, L".iso");
+		return HasExtension(name, L".iso") ||
+			HasExtension(name, L".img") ||
+			HasExtension(name, L".raw") ||
+			HasExtension(name, L".qcow") ||
+			HasExtension(name, L".qcow2") ||
+			HasExtension(name, L".qed") ||
+			HasExtension(name, L".vdi") ||
+			HasExtension(name, L".vmdk") ||
+			HasExtension(name, L".vhd") ||
+			HasExtension(name, L".vpc") ||
+			HasExtension(name, L".vhdx") ||
+			HasExtension(name, L".bochs") ||
+			HasExtension(name, L".cloop") ||
+			HasExtension(name, L".dmg") ||
+			HasExtension(name, L".hds") ||
+			HasExtension(name, L".parallels");
+	}
+
+	bool IsQemuFirmwareName(const std::wstring& name)
+	{
+		return HasExtension(name, L".bin") ||
+			HasExtension(name, L".fd") ||
+			HasExtension(name, L".rom") ||
+			HasExtension(name, L".img") ||
+			HasExtension(name, L".lid") ||
+			HasExtension(name, L".e500") ||
+			HasExtension(name, L".ndrv") ||
+			name.find(L'.') == std::wstring::npos;
+	}
+
+	bool IsKernelBootName(const std::wstring& name)
+	{
+		return HasExtension(name, L".bin") ||
+			HasExtension(name, L".elf") ||
+			HasExtension(name, L".img") ||
+			HasExtension(name, L".kernel") ||
+			HasExtension(name, L".ub") ||
+			HasExtension(name, L".uimage") ||
+			HasExtension(name, L".vmlinux") ||
+			name.find(L"Image") != std::wstring::npos ||
+			name.find(L"kernel") != std::wstring::npos ||
+			name.find(L"vmlinuz") != std::wstring::npos;
+	}
+
+	bool IsInitrdBootName(const std::wstring& name)
+	{
+		return HasExtension(name, L".cpio") ||
+			HasExtension(name, L".gz") ||
+			HasExtension(name, L".img") ||
+			HasExtension(name, L".initrd") ||
+			name.find(L"initramfs") != std::wstring::npos ||
+			name.find(L"initrd") != std::wstring::npos;
 	}
 
 	std::wstring FormatByteSize(uint64_t bytes)
@@ -778,9 +829,11 @@ DirectXPage::DirectXPage():
 	m_driveNbdReadOnly(true),
 	m_cdromNbdReadOnly(true),
 	m_argumentsHelpHideTimer(nullptr),
+	m_selectorLoadHideTimer(nullptr),
 	m_bootMediaSizeTimer(nullptr),
 	m_updatingBootMediaLists(false),
 	m_updatingBootMediaSize(false),
+	m_updatingFirmwarePathLists(false),
 	m_updatingQemuOptionLists(false),
 	m_updatingProfileList(false),
 	m_applyingProfile(false),
@@ -788,6 +841,8 @@ DirectXPage::DirectXPage():
 	m_coreDllOptionsLoading(false),
 	m_isStarting(false),
 	m_isRunning(false),
+	m_isPaused(false),
+	m_isStopping(false),
 	m_inputCaptured(true),
 	m_ctrlDown(false),
 	m_altDown(false),
@@ -811,6 +866,12 @@ DirectXPage::DirectXPage():
 	hideDelay.Duration = 10000000;
 	m_argumentsHelpHideTimer->Interval = hideDelay;
 	m_argumentsHelpHideTimer->Tick += ref new EventHandler<Object^>(this, &DirectXPage::ArgumentsHelpHideTimer_Tick);
+
+	m_selectorLoadHideTimer = ref new DispatcherTimer();
+	TimeSpan selectorHideDelay;
+	selectorHideDelay.Duration = 40000000;
+	m_selectorLoadHideTimer->Interval = selectorHideDelay;
+	m_selectorLoadHideTimer->Tick += ref new EventHandler<Object^>(this, &DirectXPage::SelectorLoadHideTimer_Tick);
 
 	m_bootMediaSizeTimer = ref new DispatcherTimer();
 	TimeSpan sizeRefreshDelay;
@@ -1020,6 +1081,17 @@ void DirectXPage::SelectDriveButton_Click(Object^ sender, RoutedEventArgs^ e)
 			m_selectedCdromFile = nullptr;
 			m_stagedCdromFile = nullptr;
 			StopMediaNbdServer(true);
+			SelectComboValue(driveFormatBox, nullptr);
+			SelectComboValue(driveInterfaceBox, nullptr);
+			SelectComboValue(driveCacheBox, nullptr);
+			SelectComboValue(driveAioBox, nullptr);
+			SelectComboValue(driveDiscardBox, nullptr);
+			SelectComboValue(driveSnapshotBox, nullptr);
+			SelectComboValue(driveReadonlyBox, nullptr);
+			SelectComboValue(cdromFormatBox, nullptr);
+			SelectComboValue(cdromInterfaceBox, nullptr);
+			SelectComboValue(cdromCacheBox, nullptr);
+			SelectComboValue(cdromAioBox, nullptr);
 			if (cdromBootMediaBox != nullptr)
 			{
 				m_updatingBootMediaLists = true;
@@ -1034,6 +1106,7 @@ void DirectXPage::SelectDriveButton_Click(Object^ sender, RoutedEventArgs^ e)
 			m_selectedCommandFile = nullptr;
 			m_selectedDriveFile = file;
 			selectedDriveText->Text = file->Path;
+			DetectMediaOptions(file, false);
 		}
 		SetStatus(L"File selected. Review qemu_cmd_line and click Start.");
 
@@ -1057,6 +1130,21 @@ void DirectXPage::SelectCdromButton_Click(Object^ sender, RoutedEventArgs^ e)
 	FileOpenPicker^ picker = ref new FileOpenPicker();
 	picker->SuggestedStartLocation = PickerLocationId::ComputerFolder;
 	picker->FileTypeFilter->Append(".iso");
+	picker->FileTypeFilter->Append(".img");
+	picker->FileTypeFilter->Append(".raw");
+	picker->FileTypeFilter->Append(".qcow");
+	picker->FileTypeFilter->Append(".qcow2");
+	picker->FileTypeFilter->Append(".qed");
+	picker->FileTypeFilter->Append(".vdi");
+	picker->FileTypeFilter->Append(".vmdk");
+	picker->FileTypeFilter->Append(".vhd");
+	picker->FileTypeFilter->Append(".vpc");
+	picker->FileTypeFilter->Append(".vhdx");
+	picker->FileTypeFilter->Append(".bochs");
+	picker->FileTypeFilter->Append(".cloop");
+	picker->FileTypeFilter->Append(".dmg");
+	picker->FileTypeFilter->Append(".hds");
+	picker->FileTypeFilter->Append(".parallels");
 
 	SetStatus(L"Opening CD-ROM picker...");
 	Concurrency::create_task(picker->PickSingleFileAsync()).then([this](StorageFile^ file)
@@ -1083,6 +1171,7 @@ void DirectXPage::SelectCdromButton_Click(Object^ sender, RoutedEventArgs^ e)
 			m_updatingBootMediaLists = false;
 		}
 		selectedCdromText->Text = file->Path;
+		DetectMediaOptions(file, true);
 		SetStatus(L"CD-ROM selected. Review qemu_cmd_line and click Start.");
 		RefreshCommandLinePreview();
 	});
@@ -1165,6 +1254,17 @@ void DirectXPage::ClearBootMediaButton_Click(Object^ sender, RoutedEventArgs^ e)
 	m_stagedCommandFile = nullptr;
 	selectedDriveText->Text = "No drive selected";
 	selectedCdromText->Text = "No CD-ROM selected";
+	SelectComboValue(driveFormatBox, nullptr);
+	SelectComboValue(driveInterfaceBox, nullptr);
+	SelectComboValue(driveCacheBox, nullptr);
+	SelectComboValue(driveAioBox, nullptr);
+	SelectComboValue(driveDiscardBox, nullptr);
+	SelectComboValue(driveSnapshotBox, nullptr);
+	SelectComboValue(driveReadonlyBox, nullptr);
+	SelectComboValue(cdromFormatBox, nullptr);
+	SelectComboValue(cdromInterfaceBox, nullptr);
+	SelectComboValue(cdromCacheBox, nullptr);
+	SelectComboValue(cdromAioBox, nullptr);
 	commandLineBox->Text = "";
 	UpdateCommandPreview();
 
@@ -1248,6 +1348,116 @@ void DirectXPage::StartButton_Click(Object^ sender, RoutedEventArgs^ e)
 
 	SetStartState(true, false);
 	StageBootFileAndStart();
+}
+
+void DirectXPage::PauseButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if (!m_isRunning || m_isPaused || m_isStopping)
+	{
+		return;
+	}
+
+	if (m_main->PauseEmulator())
+	{
+		SetPausedState(true);
+		SetStatus(L"Pause requested. The emulator will pause after the current frame.");
+	}
+}
+
+void DirectXPage::ResumeButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if (!m_isRunning || !m_isPaused || m_isStopping)
+	{
+		return;
+	}
+
+	if (m_main->ResumeEmulator())
+	{
+		SetPausedState(false);
+		SetStatus(L"Emulator resumed.");
+	}
+}
+
+void DirectXPage::StopButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if (!m_isRunning || m_isStopping)
+	{
+		return;
+	}
+
+	SetStoppingState(true);
+	SetStatus(L"Stopping emulator...");
+	auto dispatcher = Dispatcher;
+	Concurrency::create_task([this]()
+	{
+		return m_main->StopEmulator();
+	}).then([this, dispatcher](bool stopped)
+	{
+		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, stopped]()
+		{
+			SetStoppingState(false);
+			if (stopped)
+			{
+				StopAllMediaNbdServers();
+				SetPausedState(false);
+				SetStartState(false, false);
+				SetStatus(L"Emulator stopped. Start is available.");
+			}
+			else
+			{
+				AppendError(L"Stop timed out: retro_run is still busy. Shutdown may also be unable to unload the core safely.");
+				SetStartState(false, true);
+				SetPausedState(false);
+				SetStatus(L"Stop timed out. The emulator core is still busy.");
+				tabPanel->SelectedIndex = 1;
+			}
+		}));
+	});
+}
+
+void DirectXPage::ShutdownButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)sender;
+	(void)e;
+	if ((!m_isRunning && !m_isPaused) || m_isStopping)
+	{
+		return;
+	}
+
+	SetStoppingState(true);
+	SetStatus(L"Shutting down emulator core...");
+	auto dispatcher = Dispatcher;
+	Concurrency::create_task([this]()
+	{
+		return m_main->ShutdownEmulator();
+	}).then([this, dispatcher](bool shutdown)
+	{
+		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, shutdown]()
+		{
+			SetStoppingState(false);
+			if (shutdown)
+			{
+				StopAllMediaNbdServers();
+				SetPausedState(false);
+				SetStartState(false, false);
+				SetStatus(L"Emulator core stopped. Start is available.");
+			}
+			else
+			{
+				AppendError(L"Shutdown timed out: retro_run is still busy. The core could not be unloaded safely.");
+				SetStartState(false, true);
+				SetPausedState(false);
+				SetStatus(L"Shutdown timed out. Restart the app if the core does not recover.");
+				tabPanel->SelectedIndex = 1;
+			}
+		}));
+	});
 }
 
 void DirectXPage::WriteCommandLineAndStart(String^ commandLine)
@@ -1448,37 +1658,30 @@ void DirectXPage::ShowTabsButton_Click(Object^ sender, RoutedEventArgs^ e)
 	}
 }
 
-void DirectXPage::DetectTargetsButton_Click(Object^ sender, RoutedEventArgs^ e)
+void DirectXPage::ClearErrorLogButton_Click(Object^ sender, RoutedEventArgs^ e)
 {
 	(void)sender;
 	(void)e;
 
-	SetStatus(L"Detecting systems supported by qemu_libretro.dll...");
-	if (detectTargetsButton != nullptr)
+	if (errorLogBox != nullptr)
 	{
-		detectTargetsButton->IsEnabled = false;
+		errorLogBox->Text = "No errors recorded.";
 	}
 
-	std::wstring dllPath(Package::Current->InstalledLocation->Path->Data());
-	dllPath += L"\\qemu_libretro.dll";
-	auto result = std::make_shared<std::wstring>();
-	auto dispatcher = Dispatcher;
-	create_task([dllPath, result]()
+	std::wstring logPath(ApplicationData::Current->LocalFolder->Path->Data());
+	logPath += L"\\qemu-uwp.log";
+	CREATEFILE2_EXTENDED_PARAMETERS params = {};
+	params.dwSize = sizeof(params);
+	HANDLE logFile = CreateFile2(logPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ, CREATE_ALWAYS, &params);
+	if (logFile != INVALID_HANDLE_VALUE)
 	{
-		*result = ProbeQemuLibretroTargets(dllPath);
-	}).then([this, dispatcher, result]()
+		CloseHandle(logFile);
+		SetStatus(L"Errors and logs cleared.");
+	}
+	else
 	{
-		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, result]()
-		{
-			AppendError(*result);
-			SetStatus(L"Supported systems probe completed.");
-			tabPanel->SelectedIndex = 1;
-			if (detectTargetsButton != nullptr)
-			{
-				detectTargetsButton->IsEnabled = true;
-			}
-		}));
-	});
+		SetStatus(L"Errors cleared. Could not clear qemu-uwp.log.");
+	}
 }
 
 void DirectXPage::UpdateCommandLineButton_Click(Object^ sender, RoutedEventArgs^ e)
@@ -1529,6 +1732,20 @@ void DirectXPage::ArgumentsHelpHideTimer_Tick(Object^ sender, Object^ e)
 	}
 }
 
+void DirectXPage::SelectorLoadHideTimer_Tick(Object^ sender, Object^ e)
+{
+	(void)sender;
+	(void)e;
+	if (m_selectorLoadHideTimer != nullptr)
+	{
+		m_selectorLoadHideTimer->Stop();
+	}
+	if (selectorLoadProgressPanel != nullptr)
+	{
+		selectorLoadProgressPanel->Visibility = Windows::UI::Xaml::Visibility::Collapsed;
+	}
+}
+
 void DirectXPage::BootMediaSizeTimer_Tick(Object^ sender, Object^ e)
 {
 	(void)sender;
@@ -1545,6 +1762,73 @@ void DirectXPage::BootOption_Changed(Object^ sender, SelectionChangedEventArgs^ 
 
 void DirectXPage::BootOptionText_Changed(Object^ sender, TextChangedEventArgs^ e)
 {
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::FirmwarePathSelector_SelectionChanged(Object^ sender, SelectionChangedEventArgs^ e)
+{
+	(void)e;
+	if (m_updatingFirmwarePathLists)
+	{
+		return;
+	}
+
+	ComboBox^ box = dynamic_cast<ComboBox^>(sender);
+	if (box == nullptr || box->SelectedIndex <= 0)
+	{
+		return;
+	}
+
+	ComboBoxItem^ item = dynamic_cast<ComboBoxItem^>(box->SelectedItem);
+	String^ path = item != nullptr ? dynamic_cast<String^>(item->Tag) : nullptr;
+	if (path == nullptr)
+	{
+		return;
+	}
+
+	if (box == biosPathSelectorBox)
+	{
+		biosPathBox->Text = path;
+	}
+	else if (box == kernelPathSelectorBox)
+	{
+		kernelPathBox->Text = path;
+	}
+	else if (box == initrdPathSelectorBox)
+	{
+		initrdPathBox->Text = path;
+	}
+	else if (box == dtbPathSelectorBox)
+	{
+		dtbPathBox->Text = path;
+	}
+
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::ClearFirmwarePathButton_Click(Object^ sender, RoutedEventArgs^ e)
+{
+	(void)e;
+	if (sender == clearBiosPathButton)
+	{
+		ClearFirmwarePathSelector(biosPathSelectorBox, biosPathBox);
+	}
+	else if (sender == clearKernelPathButton)
+	{
+		ClearFirmwarePathSelector(kernelPathSelectorBox, kernelPathBox);
+	}
+	else if (sender == clearInitrdPathButton)
+	{
+		ClearFirmwarePathSelector(initrdPathSelectorBox, initrdPathBox);
+	}
+	else if (sender == clearDtbPathButton)
+	{
+		ClearFirmwarePathSelector(dtbPathSelectorBox, dtbPathBox);
+	}
+	else if (sender == clearKernelAppendButton && kernelAppendBox != nullptr)
+	{
+		kernelAppendBox->Text = "";
+	}
 	RefreshCommandLinePreview();
 }
 
@@ -1609,6 +1893,26 @@ void DirectXPage::MemorySlider_ValueChanged(Object^ sender, RangeBaseValueChange
 			std::wstring text = std::to_wstring(memoryMb);
 			text += L" MB";
 			memoryValueText->Text = ref new String(text.c_str());
+		}
+	}
+	RefreshCommandLinePreview();
+}
+
+void DirectXPage::SmpSlider_ValueChanged(Object^ sender, RangeBaseValueChangedEventArgs^ e)
+{
+	(void)sender;
+	int smpCount = static_cast<int>(e->NewValue + 0.5);
+	if (smpValueText != nullptr)
+	{
+		if (smpCount <= 0)
+		{
+			smpValueText->Text = "Default";
+		}
+		else
+		{
+			std::wstring text = std::to_wstring(smpCount);
+			text += smpCount == 1 ? L" CPU" : L" CPUs";
+			smpValueText->Text = ref new String(text.c_str());
 		}
 	}
 	RefreshCommandLinePreview();
@@ -1730,12 +2034,23 @@ void DirectXPage::SetStartState(bool starting, bool running)
 {
 	m_isStarting = starting;
 	m_isRunning = running;
+	if (!running)
+	{
+		m_isPaused = false;
+	}
 	if (startButton != nullptr)
 	{
-		startButton->IsEnabled = !starting && !running;
 		if (starting)
 		{
 			startButton->Label = "Starting";
+		}
+		else if (m_isStopping)
+		{
+			startButton->Label = "Stopping";
+		}
+		else if (m_isPaused)
+		{
+			startButton->Label = "Paused";
 		}
 		else if (running)
 		{
@@ -1746,12 +2061,97 @@ void DirectXPage::SetStartState(bool starting, bool running)
 			startButton->Label = "Start";
 		}
 	}
+	UpdateEmulatorButtons();
 	UpdateCaptureIndicators();
+}
+
+void DirectXPage::SetPausedState(bool paused)
+{
+	m_isPaused = paused && m_isRunning;
+	if (startButton != nullptr && m_isRunning && !m_isStopping)
+	{
+		startButton->Label = m_isPaused ? "Paused" : "Running";
+	}
+	UpdateEmulatorButtons();
+	UpdateCaptureIndicators();
+}
+
+void DirectXPage::SetStoppingState(bool stopping)
+{
+	m_isStopping = stopping;
+	if (startButton != nullptr && stopping)
+	{
+		startButton->Label = "Stopping";
+	}
+	UpdateEmulatorButtons();
+	UpdateCaptureIndicators();
+}
+
+void DirectXPage::UpdateEmulatorButtons()
+{
+	bool canStart = !m_isStarting && !m_isRunning && !m_isStopping;
+
+	if (startButton != nullptr)
+	{
+		startButton->IsEnabled = canStart;
+	}
+	if (pauseButton != nullptr)
+	{
+		pauseButton->IsEnabled = false;
+	}
+	if (resumeButton != nullptr)
+	{
+		resumeButton->IsEnabled = false;
+	}
+	if (stopButton != nullptr)
+	{
+		stopButton->IsEnabled = false;
+	}
+	if (shutdownButton != nullptr)
+	{
+		shutdownButton->IsEnabled = false;
+	}
 }
 
 void DirectXPage::SetStatus(const std::wstring& text)
 {
 	statusText->Text = ref new String(text.c_str());
+}
+
+void DirectXPage::SetSelectorLoadProgress(double percent, const std::wstring& text, bool visible)
+{
+	if (selectorLoadProgressPanel == nullptr || selectorLoadProgressBar == nullptr || selectorLoadProgressText == nullptr)
+	{
+		return;
+	}
+
+	if (percent < 0.0)
+	{
+		percent = 0.0;
+	}
+	else if (percent > 100.0)
+	{
+		percent = 100.0;
+	}
+
+	selectorLoadProgressPanel->Visibility = visible
+		? Windows::UI::Xaml::Visibility::Visible
+		: Windows::UI::Xaml::Visibility::Collapsed;
+	selectorLoadProgressBar->Value = percent;
+
+	int roundedPercent = static_cast<int>(percent + 0.5);
+	std::wstring display = std::to_wstring(roundedPercent);
+	display += L"%";
+	selectorLoadProgressText->Text = ref new String(display.c_str());
+
+	if (m_selectorLoadHideTimer != nullptr)
+	{
+		m_selectorLoadHideTimer->Stop();
+		if (visible && roundedPercent >= 100)
+		{
+			m_selectorLoadHideTimer->Start();
+		}
+	}
 }
 
 void DirectXPage::ToggleInputCapture()
@@ -1955,6 +2355,7 @@ void DirectXPage::RefreshBootMediaState()
 
 			std::wstring sizeText = L"boot_media: " + FormatByteSize(totalSize);
 			bootMediaSizeText->Text = ref new String(sizeText.c_str());
+			RefreshFirmwarePathSelectors();
 		}
 		catch (Exception^ ex)
 		{
@@ -1962,6 +2363,7 @@ void DirectXPage::RefreshBootMediaState()
 			std::wstring error = L"Failed to refresh boot_media: ";
 			error += ex->Message->Data();
 			AppendError(error);
+			RefreshFirmwarePathSelectors();
 		}
 	});
 }
@@ -2000,6 +2402,184 @@ void DirectXPage::UpdateBootMediaSize()
 	});
 }
 
+void DirectXPage::RefreshFirmwarePathSelectors()
+{
+	if (biosPathSelectorBox == nullptr || kernelPathSelectorBox == nullptr || initrdPathSelectorBox == nullptr || dtbPathSelectorBox == nullptr)
+	{
+		return;
+	}
+
+	m_updatingFirmwarePathLists = true;
+	auto resetBox = [](ComboBox^ box, const wchar_t* defaultText)
+	{
+		box->Items->Clear();
+		ComboBoxItem^ item = ref new ComboBoxItem();
+		item->Content = ref new String(defaultText);
+		box->Items->Append(item);
+		box->SelectedIndex = 0;
+	};
+
+	resetBox(biosPathSelectorBox, L"Select BIOS / firmware");
+	resetBox(kernelPathSelectorBox, L"Select kernel");
+	resetBox(initrdPathSelectorBox, L"Select initrd");
+	resetBox(dtbPathSelectorBox, L"Select DTB");
+
+	auto addFiles = [this](Windows::Foundation::Collections::IVectorView<StorageFile^>^ files, const wchar_t* prefix, bool packageFiles)
+	{
+		if (files == nullptr)
+		{
+			return;
+		}
+
+		for each (StorageFile^ file in files)
+		{
+			if (file == nullptr || file->Name == nullptr || file->Path == nullptr)
+			{
+				continue;
+			}
+
+			std::wstring name(file->Name->Data());
+			std::wstring path(file->Path->Data());
+			std::wstring display(prefix);
+			display += name;
+
+			if (packageFiles)
+			{
+				if (IsQemuFirmwareName(name))
+				{
+					AddFirmwarePathItem(biosPathSelectorBox, display, path);
+				}
+				if (IsKernelBootName(name))
+				{
+					AddFirmwarePathItem(kernelPathSelectorBox, display, path);
+				}
+				if (IsInitrdBootName(name))
+				{
+					AddFirmwarePathItem(initrdPathSelectorBox, display, path);
+				}
+				if (HasExtension(name, L".dtb"))
+				{
+					AddFirmwarePathItem(dtbPathSelectorBox, display, path);
+				}
+			}
+			else if (!IsCommandLineFile(file))
+			{
+				if (IsQemuFirmwareName(name))
+				{
+					AddFirmwarePathItem(biosPathSelectorBox, display, path);
+				}
+				if (IsKernelBootName(name))
+				{
+					AddFirmwarePathItem(kernelPathSelectorBox, display, path);
+				}
+				if (IsInitrdBootName(name))
+				{
+					AddFirmwarePathItem(initrdPathSelectorBox, display, path);
+				}
+				if (HasExtension(name, L".dtb"))
+				{
+					AddFirmwarePathItem(dtbPathSelectorBox, display, path);
+				}
+			}
+		}
+	};
+
+	Concurrency::create_task(Package::Current->InstalledLocation->GetFolderAsync("qemu")).then([](Concurrency::task<StorageFolder^> folderTask)
+	{
+		try
+		{
+			return Concurrency::create_task(folderTask.get()->GetFilesAsync());
+		}
+		catch (...)
+		{
+			return Concurrency::task_from_result<Windows::Foundation::Collections::IVectorView<StorageFile^>^>(nullptr);
+		}
+	}).then([this, addFiles](Concurrency::task<Windows::Foundation::Collections::IVectorView<StorageFile^>^> qemuFilesTask)
+	{
+		try
+		{
+			addFiles(qemuFilesTask.get(), L"qemu\\", true);
+		}
+		catch (...)
+		{
+		}
+
+		auto local = ApplicationData::Current->LocalFolder;
+		return Concurrency::create_task(local->CreateFolderAsync("boot_media", CreationCollisionOption::OpenIfExists));
+	}).then([](StorageFolder^ folder)
+	{
+		return Concurrency::create_task(folder->GetFilesAsync());
+	}).then([this, addFiles](Concurrency::task<Windows::Foundation::Collections::IVectorView<StorageFile^>^> bootFilesTask)
+	{
+		try
+		{
+			addFiles(bootFilesTask.get(), L"boot_media\\", false);
+		}
+		catch (...)
+		{
+		}
+
+		SelectFirmwarePathValue(biosPathSelectorBox, biosPathBox);
+		SelectFirmwarePathValue(kernelPathSelectorBox, kernelPathBox);
+		SelectFirmwarePathValue(initrdPathSelectorBox, initrdPathBox);
+		SelectFirmwarePathValue(dtbPathSelectorBox, dtbPathBox);
+		m_updatingFirmwarePathLists = false;
+	});
+}
+
+void DirectXPage::AddFirmwarePathItem(ComboBox^ box, const std::wstring& display, const std::wstring& path)
+{
+	if (box == nullptr || path.empty())
+	{
+		return;
+	}
+
+	ComboBoxItem^ item = ref new ComboBoxItem();
+	item->Content = ref new String(display.c_str());
+	item->Tag = ref new String(path.c_str());
+	box->Items->Append(item);
+}
+
+void DirectXPage::SelectFirmwarePathValue(ComboBox^ box, TextBox^ textBox)
+{
+	if (box == nullptr || textBox == nullptr || textBox->Text == nullptr || textBox->Text->Length() == 0)
+	{
+		if (box != nullptr)
+		{
+			box->SelectedIndex = 0;
+		}
+		return;
+	}
+
+	std::wstring value(textBox->Text->Data());
+	box->SelectedIndex = 0;
+	for (unsigned int i = 1; i < box->Items->Size; i++)
+	{
+		ComboBoxItem^ item = dynamic_cast<ComboBoxItem^>(box->Items->GetAt(i));
+		String^ tag = item != nullptr ? dynamic_cast<String^>(item->Tag) : nullptr;
+		if (tag != nullptr && _wcsicmp(tag->Data(), value.c_str()) == 0)
+		{
+			box->SelectedIndex = static_cast<int>(i);
+			return;
+		}
+	}
+}
+
+void DirectXPage::ClearFirmwarePathSelector(ComboBox^ box, TextBox^ textBox)
+{
+	bool wasUpdating = m_updatingFirmwarePathLists;
+	m_updatingFirmwarePathLists = true;
+	if (box != nullptr)
+	{
+		box->SelectedIndex = 0;
+	}
+	m_updatingFirmwarePathLists = wasUpdating;
+	if (textBox != nullptr)
+	{
+		textBox->Text = "";
+	}
+}
+
 void DirectXPage::ClearBootMediaSelection(bool cdromMedia)
 {
 	if (cdromMedia)
@@ -2008,6 +2588,10 @@ void DirectXPage::ClearBootMediaSelection(bool cdromMedia)
 		m_stagedCdromFile = nullptr;
 		StopMediaNbdServer(true);
 		selectedCdromText->Text = "No CD-ROM selected";
+		SelectComboValue(cdromFormatBox, nullptr);
+		SelectComboValue(cdromInterfaceBox, nullptr);
+		SelectComboValue(cdromCacheBox, nullptr);
+		SelectComboValue(cdromAioBox, nullptr);
 		if (cdromBootMediaBox != nullptr)
 		{
 			m_updatingBootMediaLists = true;
@@ -2025,6 +2609,13 @@ void DirectXPage::ClearBootMediaSelection(bool cdromMedia)
 		m_stagedCommandFile = nullptr;
 		StopMediaNbdServer(false);
 		selectedDriveText->Text = "No drive selected";
+		SelectComboValue(driveFormatBox, nullptr);
+		SelectComboValue(driveInterfaceBox, nullptr);
+		SelectComboValue(driveCacheBox, nullptr);
+		SelectComboValue(driveAioBox, nullptr);
+		SelectComboValue(driveDiscardBox, nullptr);
+		SelectComboValue(driveSnapshotBox, nullptr);
+		SelectComboValue(driveReadonlyBox, nullptr);
 		if (driveBootMediaBox != nullptr)
 		{
 			m_updatingBootMediaLists = true;
@@ -2063,6 +2654,7 @@ void DirectXPage::SelectPreparedMedia(StorageFile^ file, bool cdromMedia)
 			selectedDriveText->Text = "No drive selected";
 		}
 		selectedCdromText->Text = file->Path;
+		DetectMediaOptions(file, true);
 		SetStatus(L"Prepared CD-ROM selected. Review qemu_cmd_line and click Start.");
 		RefreshCommandLinePreview();
 		return;
@@ -2081,6 +2673,17 @@ void DirectXPage::SelectPreparedMedia(StorageFile^ file, bool cdromMedia)
 		m_selectedCdromFile = nullptr;
 		m_stagedCdromFile = nullptr;
 		StopMediaNbdServer(true);
+		SelectComboValue(driveFormatBox, nullptr);
+		SelectComboValue(driveInterfaceBox, nullptr);
+		SelectComboValue(driveCacheBox, nullptr);
+		SelectComboValue(driveAioBox, nullptr);
+		SelectComboValue(driveDiscardBox, nullptr);
+		SelectComboValue(driveSnapshotBox, nullptr);
+		SelectComboValue(driveReadonlyBox, nullptr);
+		SelectComboValue(cdromFormatBox, nullptr);
+		SelectComboValue(cdromInterfaceBox, nullptr);
+		SelectComboValue(cdromCacheBox, nullptr);
+		SelectComboValue(cdromAioBox, nullptr);
 		if (cdromBootMediaBox != nullptr)
 		{
 			m_updatingBootMediaLists = true;
@@ -2101,9 +2704,38 @@ void DirectXPage::SelectPreparedMedia(StorageFile^ file, bool cdromMedia)
 		m_selectedDriveFile = file;
 		m_stagedDriveFile = file;
 		selectedDriveText->Text = file->Path;
+		DetectMediaOptions(file, false);
 		RefreshCommandLinePreview();
 	}
 	SetStatus(L"Prepared drive media selected. Review qemu_cmd_line and click Start.");
+}
+
+void DirectXPage::DetectMediaOptions(StorageFile^ file, bool cdromMedia)
+{
+	if (file == nullptr || file->Name == nullptr || IsCommandLineFile(file))
+	{
+		return;
+	}
+
+	std::wstring fileName(file->Name->Data());
+	std::wstring detectedFormat = DiskFormatFromFileName(fileName);
+	if (cdromMedia)
+	{
+		SelectComboValue(cdromFormatBox, detectedFormat.c_str());
+		SelectComboValue(cdromInterfaceBox, nullptr);
+		SelectComboValue(cdromCacheBox, nullptr);
+		SelectComboValue(cdromAioBox, nullptr);
+	}
+	else
+	{
+		SelectComboValue(driveFormatBox, detectedFormat.c_str());
+		SelectComboValue(driveInterfaceBox, nullptr);
+		SelectComboValue(driveCacheBox, nullptr);
+		SelectComboValue(driveAioBox, nullptr);
+		SelectComboValue(driveDiscardBox, nullptr);
+		SelectComboValue(driveSnapshotBox, nullptr);
+		SelectComboValue(driveReadonlyBox, nullptr);
+	}
 }
 
 bool DirectXPage::IsFileInFolder(StorageFile^ file, StorageFolder^ folder)
@@ -2129,6 +2761,7 @@ void DirectXPage::RefreshQemuOptionSelectors()
 	if (m_coreDllOptionsLoaded)
 	{
 		PopulateQemuOptionSelectors();
+		SetSelectorLoadProgress(100.0, L"Selectors", true);
 		return;
 	}
 	if (m_coreDllOptionsLoading)
@@ -2137,13 +2770,24 @@ void DirectXPage::RefreshQemuOptionSelectors()
 	}
 
 	m_coreDllOptionsLoading = true;
+	SetSelectorLoadProgress(0.0, L"Selectors", true);
 	PopulateQemuOptionSelectors();
 	std::wstring dllPath(Package::Current->InstalledLocation->Path->Data());
 	dllPath += L"\\qemu_libretro.dll";
 	auto tokens = std::make_shared<std::set<std::string>>();
 	auto dispatcher = Dispatcher;
-	Concurrency::create_task([dllPath, tokens]()
+	Concurrency::create_task([this, dllPath, tokens, dispatcher]()
 	{
+		auto reportProgress = [this, dispatcher](double percent, const wchar_t* text)
+		{
+			auto message = std::make_shared<std::wstring>(text);
+			dispatcher->RunAsync(CoreDispatcherPriority::Low, ref new DispatchedHandler([this, percent, message]()
+			{
+				SetSelectorLoadProgress(percent, *message, true);
+			}));
+		};
+
+		reportProgress(5.0, L"Opening selectors");
 		CREATEFILE2_EXTENDED_PARAMETERS params = {};
 		params.dwSize = sizeof(params);
 		HANDLE dll = CreateFile2(dllPath.c_str(), GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &params);
@@ -2159,9 +2803,11 @@ void DirectXPage::RefreshQemuOptionSelectors()
 			return;
 		}
 
+		reportProgress(10.0, L"Reading selectors");
 		std::vector<unsigned char> data(static_cast<size_t>(size.QuadPart));
 		DWORD totalRead = 0;
 		DWORD chunkRead = 0;
+		double lastReported = 10.0;
 		while (totalRead < data.size())
 		{
 			DWORD remaining = static_cast<DWORD>((std::min)(data.size() - totalRead, static_cast<size_t>(1024 * 1024)));
@@ -2171,6 +2817,12 @@ void DirectXPage::RefreshQemuOptionSelectors()
 				break;
 			}
 			totalRead += chunkRead;
+			double readProgress = 10.0 + (static_cast<double>(totalRead) * 65.0 / static_cast<double>(data.size()));
+			if (readProgress - lastReported >= 5.0 || totalRead >= data.size())
+			{
+				lastReported = readProgress;
+				reportProgress(readProgress, L"Reading selectors");
+			}
 		}
 		CloseHandle(dll);
 		if (data.empty())
@@ -2178,7 +2830,9 @@ void DirectXPage::RefreshQemuOptionSelectors()
 			return;
 		}
 
+		reportProgress(80.0, L"Scanning selectors");
 		*tokens = ExtractAsciiTokens(data);
+		reportProgress(tokens->empty() ? 0.0 : 95.0, tokens->empty() ? L"Selectors unavailable" : L"Preparing selectors");
 	}).then([this, dispatcher, tokens]()
 	{
 		dispatcher->RunAsync(CoreDispatcherPriority::Normal, ref new DispatchedHandler([this, tokens]()
@@ -2195,6 +2849,7 @@ void DirectXPage::RefreshQemuOptionSelectors()
 				ApplySelectedProfile();
 			}
 			UpdateCommandPreview();
+			SetSelectorLoadProgress(m_coreDllOptionsLoaded ? 100.0 : 0.0, m_coreDllOptionsLoaded ? L"Selectors" : L"Selectors unavailable", true);
 		}));
 	});
 }
@@ -2423,13 +3078,18 @@ void DirectXPage::ApplySelectedProfile()
 	const wchar_t* device = nullptr;
 	const wchar_t* monitor = nullptr;
 	const wchar_t* netdev = nullptr;
+	const wchar_t* audio = nullptr;
+	const wchar_t* usb = nullptr;
+	const wchar_t* rtcBase = nullptr;
 	int bootDevice = -1;
+	int smpCount = -1;
 
 	switch (profile)
 	{
 	case 0: // Normal command
 		memoryMb = GetTargetProfile(currentTarget).memoryMb;
 		bootDevice = 0;
+		smpCount = 1;
 		break;
 	case 1: // Video Teste
 		memoryMb = (std::min)(GetTargetProfile(currentTarget).memoryMb, 512);
@@ -2439,10 +3099,12 @@ void DirectXPage::ApplySelectedProfile()
 		}
 		monitor = L"none";
 		bootDevice = 1;
+		smpCount = 1;
 		break;
 	case 2: // Linux cloud qcow2
 		arch = L"x86_64";
 		memoryMb = 2048;
+		smpCount = 2;
 		machine = L"q35";
 		cpu = L"qemu64";
 		vga = L"virtio";
@@ -2453,6 +3115,7 @@ void DirectXPage::ApplySelectedProfile()
 	case 3: // Ubuntu 10
 		arch = L"i386";
 		memoryMb = 1024;
+		smpCount = 1;
 		machine = L"pc";
 		cpu = L"pentium3";
 		vga = L"std";
@@ -2463,6 +3126,7 @@ void DirectXPage::ApplySelectedProfile()
 	case 4: // Ubuntu 14
 		arch = L"x86_64";
 		memoryMb = 2048;
+		smpCount = 2;
 		machine = L"pc";
 		cpu = L"qemu64";
 		vga = L"std";
@@ -2473,31 +3137,42 @@ void DirectXPage::ApplySelectedProfile()
 	case 5: // Windows 98
 		arch = L"i386";
 		memoryMb = 256;
+		smpCount = 1;
 		machine = L"pc";
 		cpu = L"pentium2";
 		vga = L"cirrus";
 		device = L"rtl8139";
 		netdev = L"user";
+		audio = L"sb16";
+		usb = L"off";
+		rtcBase = L"localtime";
 		bootDevice = 0;
 		break;
 	case 6: // Windows XP
 		arch = L"i386";
 		memoryMb = 512;
+		smpCount = 1;
 		machine = L"pc";
 		cpu = L"pentium3";
 		vga = L"std";
 		device = L"rtl8139";
 		netdev = L"user";
+		audio = L"AC97";
+		rtcBase = L"localtime";
 		bootDevice = 0;
 		break;
 	case 7: // Windows 7
 		arch = L"x86_64";
 		memoryMb = 2048;
+		smpCount = 2;
 		machine = L"q35";
 		cpu = L"qemu64";
 		vga = L"std";
 		device = L"e1000";
 		netdev = L"user";
+		audio = L"intel-hda";
+		usb = L"on";
+		rtcBase = L"localtime";
 		bootDevice = 0;
 		break;
 	default:
@@ -2512,6 +3187,10 @@ void DirectXPage::ApplySelectedProfile()
 	{
 		memorySlider->Value = memoryMb;
 	}
+	if (smpCount >= 0 && smpSlider != nullptr)
+	{
+		smpSlider->Value = smpCount;
+	}
 	PopulateQemuOptionSelectors();
 	SelectComboValue(machineBox, machine);
 	SelectComboValue(cpuBox, cpu);
@@ -2519,6 +3198,38 @@ void DirectXPage::ApplySelectedProfile()
 	SelectComboValue(deviceBox, device);
 	SelectComboValue(monitorBox, monitor);
 	SelectComboValue(netdevBox, netdev);
+	SelectComboValue(bootOrderBox, nullptr);
+	SelectComboValue(bootMenuBox, nullptr);
+	SelectComboValue(bootStrictBox, nullptr);
+	SelectComboValue(bootOnceBox, nullptr);
+	SelectComboValue(driveFormatBox, nullptr);
+	SelectComboValue(driveInterfaceBox, nullptr);
+	SelectComboValue(driveCacheBox, nullptr);
+	SelectComboValue(driveAioBox, nullptr);
+	SelectComboValue(driveDiscardBox, nullptr);
+	SelectComboValue(driveSnapshotBox, nullptr);
+	SelectComboValue(driveReadonlyBox, nullptr);
+	SelectComboValue(cdromFormatBox, nullptr);
+	SelectComboValue(cdromInterfaceBox, nullptr);
+	SelectComboValue(cdromCacheBox, nullptr);
+	SelectComboValue(cdromAioBox, nullptr);
+	SelectComboValue(audioDeviceBox, audio);
+	SelectComboValue(usbModeBox, usb);
+	SelectComboValue(inputDeviceBox, nullptr);
+	SelectComboValue(rtcBaseBox, rtcBase);
+	SelectComboValue(rtcClockBox, nullptr);
+	SelectComboValue(debugBehaviorBox, nullptr);
+	SelectComboValue(serialBox, nullptr);
+	SelectComboValue(parallelBox, nullptr);
+	SelectComboValue(debugFlagsBox, nullptr);
+	ClearFirmwarePathSelector(biosPathSelectorBox, biosPathBox);
+	ClearFirmwarePathSelector(kernelPathSelectorBox, kernelPathBox);
+	ClearFirmwarePathSelector(initrdPathSelectorBox, initrdPathBox);
+	ClearFirmwarePathSelector(dtbPathSelectorBox, dtbPathBox);
+	if (kernelAppendBox != nullptr)
+	{
+		kernelAppendBox->Text = "";
+	}
 	if (bootDevice >= 0 && bootDeviceBox != nullptr)
 	{
 		bootDeviceBox->SelectedIndex = bootDevice;
@@ -2550,9 +3261,48 @@ void DirectXPage::ResetCommandDefaults()
 	{
 		bootDeviceBox->SelectedIndex = 0;
 	}
+	auto resetCombo = [](ComboBox^ box)
+	{
+		if (box != nullptr)
+		{
+			box->SelectedIndex = 0;
+		}
+	};
+	resetCombo(bootOrderBox);
+	resetCombo(bootMenuBox);
+	resetCombo(bootStrictBox);
+	resetCombo(bootOnceBox);
+	resetCombo(driveFormatBox);
+	resetCombo(driveInterfaceBox);
+	resetCombo(driveCacheBox);
+	resetCombo(driveAioBox);
+	resetCombo(driveDiscardBox);
+	resetCombo(driveSnapshotBox);
+	resetCombo(driveReadonlyBox);
+	resetCombo(cdromFormatBox);
+	resetCombo(cdromInterfaceBox);
+	resetCombo(cdromCacheBox);
+	resetCombo(cdromAioBox);
+	resetCombo(audioDeviceBox);
+	resetCombo(usbModeBox);
+	resetCombo(inputDeviceBox);
+	resetCombo(rtcBaseBox);
+	resetCombo(rtcClockBox);
+	resetCombo(debugBehaviorBox);
+	resetCombo(serialBox);
+	resetCombo(parallelBox);
+	resetCombo(debugFlagsBox);
 	if (diagnosticProfileBox != nullptr)
 	{
 		diagnosticProfileBox->SelectedIndex = 0;
+	}
+	ClearFirmwarePathSelector(biosPathSelectorBox, biosPathBox);
+	ClearFirmwarePathSelector(kernelPathSelectorBox, kernelPathBox);
+	ClearFirmwarePathSelector(initrdPathSelectorBox, initrdPathBox);
+	ClearFirmwarePathSelector(dtbPathSelectorBox, dtbPathBox);
+	if (kernelAppendBox != nullptr)
+	{
+		kernelAppendBox->Text = "";
 	}
 	if (extraArgumentsBox != nullptr)
 	{
@@ -2566,7 +3316,12 @@ void DirectXPage::ResetCommandDefaults()
 	{
 		memorySlider->Value = GetTargetProfile(L"x86_64").memoryMb;
 	}
+	if (smpSlider != nullptr)
+	{
+		smpSlider->Value = 1;
+	}
 	RefreshBootMediaState();
+	RefreshFirmwarePathSelectors();
 	RefreshQemuOptionSelectors();
 	UpdateCommandPreview();
 }
@@ -3031,6 +3786,13 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 		command += L"M";
 	}
 
+	int smpCount = smpSlider != nullptr ? static_cast<int>(smpSlider->Value + 0.5) : 0;
+	if (smpCount > 0)
+	{
+		command += L" -smp ";
+		command += std::to_wstring(smpCount);
+	}
+
 	std::wstring selectedCpu = SelectedComboValue(cpuBox);
 	if (!selectedCpu.empty())
 	{
@@ -3071,10 +3833,49 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 		}
 	}
 
+	auto appendBootOption = [this, &command](const std::wstring& fallbackOrder)
+	{
+		std::wstring order = SelectedComboValue(bootOrderBox);
+		if (order.empty())
+		{
+			order = fallbackOrder;
+		}
+
+		std::wstring menu = SelectedComboValue(bootMenuBox);
+		std::wstring strict = SelectedComboValue(bootStrictBox);
+		std::wstring once = SelectedComboValue(bootOnceBox);
+		bool useExtendedSyntax = !menu.empty() || !strict.empty() || !once.empty() || order.length() > 1;
+		command += L" -boot ";
+		if (useExtendedSyntax)
+		{
+			command += L"order=";
+			command += order;
+			if (!menu.empty())
+			{
+				command += L",menu=";
+				command += menu;
+			}
+			if (!strict.empty())
+			{
+				command += L",strict=";
+				command += strict;
+			}
+			if (!once.empty())
+			{
+				command += L",once=";
+				command += once;
+			}
+		}
+		else
+		{
+			command += order;
+		}
+	};
+
 	int diagnosticProfile = diagnosticProfileBox != nullptr ? diagnosticProfileBox->SelectedIndex : 0;
 	if (diagnosticProfile == 1)
 	{
-		command += L" -boot c";
+		appendBootOption(L"c");
 	}
 	else
 	{
@@ -3083,10 +3884,38 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 		{
 			std::wstring fileName(driveFile->Name->Data());
 			std::wstring diskFormat = DiskFormatFromFileName(fileName);
+			std::wstring selectedDriveFormat = SelectedComboValue(driveFormatBox);
+			if (!selectedDriveFormat.empty())
+			{
+				diskFormat = selectedDriveFormat;
+			}
 			std::wstring mediaUrl;
-			bool useVirtio = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
-				targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
-				targetProfile.blockStyle == TargetBlockStyle::VirtioCcw;
+			std::wstring driveInterface = SelectedComboValue(driveInterfaceBox);
+			TargetBlockStyle driveBlockStyle = targetProfile.blockStyle;
+			bool useUsbStorage = false;
+			if (_wcsicmp(driveInterface.c_str(), L"ide") == 0)
+			{
+				driveBlockStyle = TargetBlockStyle::Ide;
+			}
+			else if (_wcsicmp(driveInterface.c_str(), L"scsi") == 0)
+			{
+				driveBlockStyle = TargetBlockStyle::Scsi;
+			}
+			else if (_wcsicmp(driveInterface.c_str(), L"virtio") == 0)
+			{
+				driveBlockStyle = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
+					targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
+					targetProfile.blockStyle == TargetBlockStyle::VirtioCcw
+					? targetProfile.blockStyle
+					: TargetBlockStyle::VirtioPci;
+			}
+			else if (_wcsicmp(driveInterface.c_str(), L"usb") == 0)
+			{
+				useUsbStorage = true;
+			}
+			bool useVirtio = driveBlockStyle == TargetBlockStyle::VirtioMmio ||
+				driveBlockStyle == TargetBlockStyle::VirtioPci ||
+				driveBlockStyle == TargetBlockStyle::VirtioCcw;
 			if (canStartDriveServer && EnsureMediaNbdServer(driveFile, false, false, mediaUrl))
 			{
 				command += L" -drive file=";
@@ -3098,16 +3927,50 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 			}
 			command += L",format=";
 			command += diskFormat;
-			if (useVirtio)
+			std::wstring driveCache = SelectedComboValue(driveCacheBox);
+			if (!driveCache.empty())
+			{
+				command += L",cache=";
+				command += driveCache;
+			}
+			std::wstring driveAio = SelectedComboValue(driveAioBox);
+			if (!driveAio.empty())
+			{
+				command += L",aio=";
+				command += driveAio;
+			}
+			std::wstring driveDiscard = SelectedComboValue(driveDiscardBox);
+			if (!driveDiscard.empty())
+			{
+				command += L",discard=";
+				command += driveDiscard;
+			}
+			std::wstring driveSnapshot = SelectedComboValue(driveSnapshotBox);
+			if (!driveSnapshot.empty())
+			{
+				command += L",snapshot=";
+				command += driveSnapshot;
+			}
+			std::wstring driveReadonly = SelectedComboValue(driveReadonlyBox);
+			if (!driveReadonly.empty())
+			{
+				command += L",readonly=";
+				command += driveReadonly;
+			}
+			if (useUsbStorage)
+			{
+				command += L",if=none,id=drive0,media=disk -device usb-storage,drive=drive0";
+			}
+			else if (useVirtio)
 			{
 				command += L",if=none,id=drive0,media=disk -device ";
-				command += VirtioDevice(targetProfile.blockStyle);
+				command += VirtioDevice(driveBlockStyle);
 				command += L",drive=drive0";
 			}
 			else
 			{
 				command += L",if=";
-				command += BlockInterface(targetProfile.blockStyle);
+				command += BlockInterface(driveBlockStyle);
 				command += L",media=disk";
 			}
 			hasBootDevice = true;
@@ -3116,9 +3979,32 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 		if (cdromFile != nullptr)
 		{
 			std::wstring mediaUrl;
-			bool useVirtio = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
-				targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
-				targetProfile.blockStyle == TargetBlockStyle::VirtioCcw;
+			std::wstring cdromInterface = SelectedComboValue(cdromInterfaceBox);
+			TargetBlockStyle cdromBlockStyle = targetProfile.blockStyle;
+			bool useUsbCdrom = false;
+			if (_wcsicmp(cdromInterface.c_str(), L"ide") == 0)
+			{
+				cdromBlockStyle = TargetBlockStyle::Ide;
+			}
+			else if (_wcsicmp(cdromInterface.c_str(), L"scsi") == 0)
+			{
+				cdromBlockStyle = TargetBlockStyle::Scsi;
+			}
+			else if (_wcsicmp(cdromInterface.c_str(), L"virtio") == 0)
+			{
+				cdromBlockStyle = targetProfile.blockStyle == TargetBlockStyle::VirtioMmio ||
+					targetProfile.blockStyle == TargetBlockStyle::VirtioPci ||
+					targetProfile.blockStyle == TargetBlockStyle::VirtioCcw
+					? targetProfile.blockStyle
+					: TargetBlockStyle::VirtioPci;
+			}
+			else if (_wcsicmp(cdromInterface.c_str(), L"usb") == 0)
+			{
+				useUsbCdrom = true;
+			}
+			bool useVirtio = cdromBlockStyle == TargetBlockStyle::VirtioMmio ||
+				cdromBlockStyle == TargetBlockStyle::VirtioPci ||
+				cdromBlockStyle == TargetBlockStyle::VirtioCcw;
 			if (canStartCdromServer && EnsureMediaNbdServer(cdromFile, true, true, mediaUrl))
 			{
 				command += L" -drive file=";
@@ -3128,17 +4014,35 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 			{
 				command += L" -drive file=\"nbd://127.0.0.1:10810\"";
 			}
-			command += L",format=raw";
-			if (useVirtio)
+			std::wstring cdromFormat = SelectedComboValue(cdromFormatBox);
+			command += L",format=";
+			command += cdromFormat.empty() ? L"raw" : cdromFormat;
+			std::wstring cdromCache = SelectedComboValue(cdromCacheBox);
+			if (!cdromCache.empty())
+			{
+				command += L",cache=";
+				command += cdromCache;
+			}
+			std::wstring cdromAio = SelectedComboValue(cdromAioBox);
+			if (!cdromAio.empty())
+			{
+				command += L",aio=";
+				command += cdromAio;
+			}
+			if (useUsbCdrom)
+			{
+				command += L",if=none,id=cdrom0,media=cdrom,readonly=on -device usb-storage,drive=cdrom0";
+			}
+			else if (useVirtio)
 			{
 				command += L",if=none,id=cdrom0,media=cdrom,readonly=on -device ";
-				command += VirtioDevice(targetProfile.blockStyle);
+				command += VirtioDevice(cdromBlockStyle);
 				command += L",drive=cdrom0";
 			}
 			else
 			{
 				command += L",if=";
-				command += BlockInterface(targetProfile.blockStyle);
+				command += BlockInterface(cdromBlockStyle);
 				command += L",media=cdrom,readonly=on";
 			}
 			hasBootDevice = true;
@@ -3149,22 +4053,164 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 			int bootDevice = bootDeviceBox != nullptr ? bootDeviceBox->SelectedIndex : 0;
 			if (bootDevice == 1)
 			{
-				command += L" -boot c";
+				appendBootOption(L"c");
 			}
 			else if (bootDevice == 2)
 			{
-				command += L" -boot d";
+				appendBootOption(L"d");
 			}
 			else
 			{
-				command += cdromFile != nullptr ? L" -boot d" : L" -boot c";
+				appendBootOption(cdromFile != nullptr ? L"d" : L"c");
 			}
 		}
 		else
 		{
-			command += L" -boot c";
+			appendBootOption(L"c");
 		}
 	}
+
+	std::wstring audioDevice = SelectedComboValue(audioDeviceBox);
+	if (!audioDevice.empty())
+	{
+		if (_wcsicmp(audioDevice.c_str(), L"intel-hda") == 0)
+		{
+			command += L" -device intel-hda -device hda-duplex";
+		}
+		else
+		{
+			command += L" -device ";
+			command += audioDevice;
+		}
+	}
+
+	std::wstring usbMode = SelectedComboValue(usbModeBox);
+	if (_wcsicmp(usbMode.c_str(), L"on") == 0)
+	{
+		command += L" -usb";
+	}
+	else if (_wcsicmp(usbMode.c_str(), L"off") == 0)
+	{
+		command += L" -machine usb=off";
+	}
+	else if (_wcsicmp(usbMode.c_str(), L"ehci") == 0)
+	{
+		command += L" -device usb-ehci";
+	}
+	else if (_wcsicmp(usbMode.c_str(), L"xhci") == 0)
+	{
+		command += L" -device qemu-xhci";
+	}
+
+	std::wstring inputDevices = SelectedComboValue(inputDeviceBox);
+	if (!inputDevices.empty())
+	{
+		if (usbMode.empty())
+		{
+			command += L" -usb";
+		}
+		size_t start = 0;
+		while (start < inputDevices.length())
+		{
+			size_t comma = inputDevices.find(L',', start);
+			std::wstring device = inputDevices.substr(start, comma == std::wstring::npos ? std::wstring::npos : comma - start);
+			if (!device.empty())
+			{
+				command += L" -device ";
+				command += device;
+			}
+			if (comma == std::wstring::npos)
+			{
+				break;
+			}
+			start = comma + 1;
+		}
+	}
+
+	std::wstring rtcBase = SelectedComboValue(rtcBaseBox);
+	std::wstring rtcClock = SelectedComboValue(rtcClockBox);
+	if (!rtcBase.empty() || !rtcClock.empty())
+	{
+		command += L" -rtc";
+		bool firstRtcOption = true;
+		if (!rtcBase.empty())
+		{
+			command += L" base=";
+			command += rtcBase;
+			firstRtcOption = false;
+		}
+		if (!rtcClock.empty())
+		{
+			command += firstRtcOption ? L" clock=" : L",clock=";
+			command += rtcClock;
+		}
+	}
+
+	std::wstring serial = SelectedComboValue(serialBox);
+	if (!serial.empty())
+	{
+		command += L" -serial ";
+		command += serial;
+	}
+
+	std::wstring parallel = SelectedComboValue(parallelBox);
+	if (!parallel.empty())
+	{
+		command += L" -parallel ";
+		command += parallel;
+	}
+
+	std::wstring debugFlags = SelectedComboValue(debugFlagsBox);
+	if (!debugFlags.empty())
+	{
+		command += L" -d ";
+		command += debugFlags;
+	}
+
+	std::wstring debugBehavior = SelectedComboValue(debugBehaviorBox);
+	if (!debugBehavior.empty())
+	{
+		command += L" ";
+		command += debugBehavior;
+	}
+
+	auto appendTextOption = [this, &command](const wchar_t* option, TextBox^ box, bool quote)
+	{
+		if (box == nullptr || box->Text == nullptr || box->Text->Length() == 0)
+		{
+			return;
+		}
+		std::wstring value(box->Text->Data());
+		while (!value.empty() && iswspace(value.front()))
+		{
+			value.erase(value.begin());
+		}
+		while (!value.empty() && iswspace(value.back()))
+		{
+			value.pop_back();
+		}
+		if (value.empty())
+		{
+			return;
+		}
+		command += L" ";
+		command += option;
+		command += L" ";
+		if (quote)
+		{
+			command += QuoteForCommandLine(ref new String(value.c_str()))->Data();
+		}
+		else
+		{
+			command += value;
+		}
+	};
+
+	appendTextOption(L"-bios", biosPathBox, true);
+	appendTextOption(L"-kernel", kernelPathBox, true);
+	appendTextOption(L"-initrd", initrdPathBox, true);
+	appendTextOption(L"-dtb", dtbPathBox, true);
+	appendTextOption(L"-append", kernelAppendBox, true);
 
 	return ref new String(command.c_str());
 }
