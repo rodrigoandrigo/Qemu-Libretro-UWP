@@ -1,4 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <PropertyGroup />
+  <PropertyGroup>
+    <Source>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</Source>
+    <SmallTileSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</SmallTileSource>
+    <MediumTileSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</MediumTileSource>
+    <WideTileSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</WideTileSource>
+    <LargeTileSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</LargeTileSource>
+    <AppIconSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</AppIconSource>
+    <SplashScreenSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</SplashScreenSource>
+    <PackageLogoSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</PackageLogoSource>
+    <BadgeLogoSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</BadgeLogoSource>
+  </PropertyGroup>
 </Project>

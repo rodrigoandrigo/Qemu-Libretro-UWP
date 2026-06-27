@@ -12,6 +12,8 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
+#include <map>
 
 namespace Qemu_Libretro_UWP
 {
@@ -43,6 +45,13 @@ namespace Qemu_Libretro_UWP
 		void SelectBootButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void SelectDriveButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void SelectCdromButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void RemoveDriveButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void RemoveCdromButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void DriveBootMediaBox_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
+		void CdromBootMediaBox_SelectionChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
+		void ClearBootMediaButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void ResetCommandDefaultsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void AlignCommandLineButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void StartButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void ResetButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
 		void ShowTabsButton_Click(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
@@ -51,11 +60,14 @@ namespace Qemu_Libretro_UWP
 		void ArgumentsHelpButton_PointerEntered(Platform::Object^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs^ e);
 		void ArgumentsHelpButton_PointerExited(Platform::Object^ sender, Windows::UI::Xaml::Input::PointerRoutedEventArgs^ e);
 		void ArgumentsHelpHideTimer_Tick(Platform::Object^ sender, Platform::Object^ e);
-		void BootOption_Changed(Platform::Object^ sender, Windows::UI::Xaml::RoutedEventArgs^ e);
+		void BootMediaSizeTimer_Tick(Platform::Object^ sender, Platform::Object^ e);
+		void BootOption_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void BootOptionText_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::TextChangedEventArgs^ e);
 		void Architecture_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
+		void QemuOption_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void DiagnosticProfile_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void MemorySlider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
+		void AdditionalArguments_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::TextChangedEventArgs^ e);
 		void OnKeyDown(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
 		void OnKeyUp(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
 		void OnCompositionScaleChanged(Windows::UI::Xaml::Controls::SwapChainPanel^ sender, Object^ args);
@@ -67,7 +79,27 @@ namespace Qemu_Libretro_UWP
 		void FocusEmulatorSurface();
 		void SendPointerToCore(Windows::UI::Core::PointerEventArgs^ e);
 		void RefreshCommandLinePreview();
+		void RefreshBootMediaState();
+		void UpdateBootMediaSize();
+		void ClearBootMediaSelection(bool driveMedia);
+		void SelectPreparedMedia(Windows::Storage::StorageFile^ file, bool cdromMedia);
+		void RefreshQemuOptionSelectors();
+		void PopulateQemuOptionSelectors();
+		void AddQemuOptionItems(Windows::UI::Xaml::Controls::ComboBox^ box, const wchar_t* defaultText, const std::vector<const wchar_t*>& candidates);
+		bool CoreDllHasAscii(const wchar_t* value);
+		std::wstring SelectedComboValue(Windows::UI::Xaml::Controls::ComboBox^ box);
+		void SelectComboValue(Windows::UI::Xaml::Controls::ComboBox^ box, const wchar_t* value);
+		void SelectArchitectureValue(const wchar_t* value);
+		int SelectedProfileIndex() const;
+		bool IsVideoTestProfile() const;
+		void ApplySelectedProfile();
+		void ResetCommandDefaults();
+		void UpdateCommandPreview();
 		Platform::String^ BuildCommandLine();
+		Platform::String^ BuildAutomaticCommandLine();
+		Platform::String^ BuildAdditionalArguments();
+		Platform::String^ FormatCommandLineVertical(Platform::String^ value);
+		bool IsFileInFolder(Windows::Storage::StorageFile^ file, Windows::Storage::StorageFolder^ folder);
 		bool EnsureMediaNbdServer(Windows::Storage::StorageFile^ mediaFile, bool readOnly, bool cdromMedia, std::wstring& url);
 		void StopMediaNbdServer(bool cdromMedia);
 		void StopAllMediaNbdServers();
@@ -113,6 +145,15 @@ namespace Qemu_Libretro_UWP
 		bool m_driveNbdReadOnly;
 		bool m_cdromNbdReadOnly;
 		Windows::UI::Xaml::DispatcherTimer^ m_argumentsHelpHideTimer;
+		Windows::UI::Xaml::DispatcherTimer^ m_bootMediaSizeTimer;
+		bool m_updatingBootMediaLists;
+		bool m_updatingBootMediaSize;
+		bool m_updatingQemuOptionLists;
+		bool m_applyingProfile;
+		bool m_coreDllOptionsLoaded;
+		bool m_coreDllOptionsLoading;
+		std::vector<unsigned char> m_coreDllData;
+		std::map<std::wstring, bool> m_coreDllOptionPresence;
 		bool m_isStarting;
 		bool m_isRunning;
 		bool m_windowVisible;

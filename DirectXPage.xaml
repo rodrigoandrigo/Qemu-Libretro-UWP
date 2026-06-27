@@ -15,6 +15,8 @@
     <SolidColorBrush x:Key="MutedTextBrush" Color="#FF9CA3AF" />
     <SolidColorBrush x:Key="SectionLineBrush" Color="#FF5F6368" />
     <SolidColorBrush x:Key="AccentBrush" Color="#FF00C853" />
+    <SolidColorBrush x:Key="AutoCommandBrush" Color="#FF7DD3FC" />
+    <SolidColorBrush x:Key="AdditionalCommandBrush" Color="#FFFACC15" />
   </Page.Resources>
 
   <Grid Background="Black">
@@ -96,13 +98,36 @@
                         <ColumnDefinition Width="160" />
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                       </Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Drive media" Foreground="White" FontWeight="SemiBold" />
                         <TextBlock Text="RAW, QCOW, VDI, VMDK, VHD/VHDX, DMG, QED or qemu_cmd_line" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
                       </StackPanel>
-                      <TextBlock x:Name="selectedDriveText" Grid.Column="1" Text="No drive selected" Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" Margin="12,0" VerticalAlignment="Center" />
+                      <StackPanel Grid.Column="1" Spacing="6" Margin="12,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="selectedDriveText" Text="No drive selected" Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" />
+                        <ComboBox x:Name="driveBootMediaBox" Header="Prepared drive media" HorizontalAlignment="Stretch" SelectionChanged="DriveBootMediaBox_SelectionChanged" />
+                      </StackPanel>
                       <AppBarButton Grid.Column="2" Icon="OpenFile" Label="Select drive" Click="SelectDriveButton_Click" Foreground="White" />
+                      <AppBarButton Grid.Column="3" Icon="Cancel" Label="Remove" Click="RemoveDriveButton_Click" Foreground="White" />
+                    </Grid>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="CD-ROM media" Foreground="White" FontWeight="SemiBold" />
+                        <TextBlock Text="ISO mounted with -cdrom via NBD" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="6" Margin="12,0" VerticalAlignment="Center">
+                        <TextBlock x:Name="selectedCdromText" Text="No CD-ROM selected" Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" />
+                        <ComboBox x:Name="cdromBootMediaBox" Header="Prepared CD-ROM media" HorizontalAlignment="Stretch" SelectionChanged="CdromBootMediaBox_SelectionChanged" />
+                      </StackPanel>
+                      <AppBarButton Grid.Column="2" Icon="OpenFile" Label="Select CD-ROM" Click="SelectCdromButton_Click" Foreground="White" />
+                      <AppBarButton Grid.Column="3" Icon="Cancel" Label="Remove" Click="RemoveCdromButton_Click" Foreground="White" />
                     </Grid>
                     <Grid>
                       <Grid.ColumnDefinitions>
@@ -110,12 +135,16 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                       </Grid.ColumnDefinitions>
-                      <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                        <TextBlock Text="CD-ROM media" Foreground="White" FontWeight="SemiBold" />
-                        <TextBlock Text="ISO mounted with -cdrom via NBD" Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
+                      <TextBlock Grid.Column="0" Text="Boot device" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center" />
+                      <ComboBox x:Name="bootDeviceBox" Grid.Column="1" Header="Startup device" SelectedIndex="0" HorizontalAlignment="Left" Width="240" SelectionChanged="BootOption_Changed">
+                        <ComboBoxItem Content="Auto" />
+                        <ComboBoxItem Content="Drive" />
+                        <ComboBoxItem Content="CD-ROM" />
+                      </ComboBox>
+                      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <TextBlock x:Name="bootMediaSizeText" Text="boot_media: calculating..." Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                        <Button x:Name="clearBootMediaButton" Content="Clear boot_media" Click="ClearBootMediaButton_Click" />
                       </StackPanel>
-                      <TextBlock x:Name="selectedCdromText" Grid.Column="1" Text="No CD-ROM selected" Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" Margin="12,0" VerticalAlignment="Center" />
-                      <AppBarButton Grid.Column="2" Icon="OpenFile" Label="Select CD-ROM" Click="SelectCdromButton_Click" Foreground="White" />
                     </Grid>
                   </StackPanel>
                 </Border>
@@ -159,6 +188,28 @@
                       <TextBlock Text="0 MB uses the QEMU default. Values above 0 are written as -m XM." Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
                     </StackPanel>
 
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="machineBox" Grid.Column="0" Header="Machine" Margin="0,0,8,0" SelectionChanged="QemuOption_Changed" />
+                      <ComboBox x:Name="cpuBox" Grid.Column="1" Header="CPU" Margin="4,0,4,0" SelectionChanged="QemuOption_Changed" />
+                      <ComboBox x:Name="vgaBox" Grid.Column="2" Header="VGA" Margin="8,0,0,0" SelectionChanged="QemuOption_Changed" />
+                    </Grid>
+
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <ComboBox x:Name="deviceBox" Grid.Column="0" Header="Device" Margin="0,0,8,0" SelectionChanged="QemuOption_Changed" />
+                      <ComboBox x:Name="monitorBox" Grid.Column="1" Header="Monitor" Margin="4,0,4,0" SelectionChanged="QemuOption_Changed" />
+                      <ComboBox x:Name="netdevBox" Grid.Column="2" Header="Netdev" Margin="8,0,0,0" SelectionChanged="QemuOption_Changed" />
+                    </Grid>
+
                     <StackPanel Spacing="4">
                       <Grid>
                         <Grid.RowDefinitions>
@@ -198,20 +249,25 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                           </Grid.ColumnDefinitions>
-                          <TextBox x:Name="extraArgumentsBox" Header="Additional QEMU arguments" PlaceholderText="-cpu qemu64 -vga std -no-reboot" TextWrapping="NoWrap" />
+                          <TextBox x:Name="extraArgumentsBox" Header="Additional QEMU arguments" PlaceholderText="-no-reboot -rtc base=localtime" TextWrapping="NoWrap" TextChanged="AdditionalArguments_Changed" />
                           <Button Grid.Column="1" Content="Update qemu_cmd_line" Margin="10,24,0,0" Click="UpdateCommandLineButton_Click" />
                         </Grid>
                       </Grid>
                     </StackPanel>
 
                     <StackPanel Spacing="4">
-                      <TextBlock Text="Test profile" Foreground="White" FontWeight="SemiBold" />
-                      <ComboBox x:Name="diagnosticProfileBox" Header="QEMU startup test" SelectedIndex="0" Width="360" HorizontalAlignment="Left" SelectionChanged="DiagnosticProfile_Changed">
+                      <TextBlock Text="Profile" Foreground="White" FontWeight="SemiBold" />
+                      <ComboBox x:Name="diagnosticProfileBox" Header="QEMU profile" SelectedIndex="0" Width="360" HorizontalAlignment="Left" SelectionChanged="DiagnosticProfile_Changed">
                         <ComboBoxItem Content="Normal command" />
-                        <ComboBoxItem Content="Empty CD-ROM no file" />
-                        <ComboBoxItem Content="Null block" />
+                        <ComboBoxItem Content="Video Teste" />
+                        <ComboBoxItem Content="Linux cloud qcow2" />
+                        <ComboBoxItem Content="Ubuntu 10" />
+                        <ComboBoxItem Content="Ubuntu 14" />
+                        <ComboBoxItem Content="Windows 98" />
+                        <ComboBoxItem Content="Windows XP" />
+                        <ComboBoxItem Content="Windows 7" />
                       </ComboBox>
-                      <TextBlock Text="Use Normal command for boot. Other profiles are diagnostics only." Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
+                      <TextBlock Text="Video Teste starts without media. Other profiles tune the selected QEMU target and machine options." Foreground="{StaticResource MutedTextBrush}" FontSize="12" TextWrapping="WrapWholeWords" />
                     </StackPanel>
                   </StackPanel>
                 </Border>
@@ -236,15 +292,22 @@
               </StackPanel>
             </PivotItem>
 
-            <PivotItem AutomationProperties.Name="qemu_cmd_line">
+            <PivotItem AutomationProperties.Name="qemu commands">
               <PivotItem.Header>
                 <SymbolIcon Symbol="Page" />
               </PivotItem.Header>
               <StackPanel Padding="16,14,16,24" Spacing="14">
                 <StackPanel Spacing="4">
-                  <TextBlock Text="qemu_cmd_line" Foreground="White" FontSize="20" FontWeight="SemiBold" />
+                  <TextBlock Text="qemu commands" Foreground="White" FontSize="20" FontWeight="SemiBold" />
                   <TextBlock Text="Review or edit the command passed to qemu-libretro." Foreground="{StaticResource MutedTextBrush}" TextWrapping="WrapWholeWords" />
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <Button x:Name="resetCommandDefaultsButton" Content="Reset defaults" Click="ResetCommandDefaultsButton_Click" />
+                  <Button x:Name="alignCommandLineButton" Content="Align vertical" Click="AlignCommandLineButton_Click" />
+                </StackPanel>
+                <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource SectionLineBrush}" BorderThickness="1" Padding="12">
+                  <RichTextBlock x:Name="commandPreviewBlock" FontFamily="Consolas" FontSize="13" TextWrapping="Wrap" />
+                </Border>
                 <Border Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource SectionLineBrush}" BorderThickness="1" Padding="12">
                   <TextBox x:Name="commandLineBox" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="Consolas" MinHeight="260" Header="Generated command" PlaceholderText="The generated qemu_cmd_line will appear here." />
                 </Border>

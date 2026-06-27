@@ -120,9 +120,10 @@ The available diagnostic profiles are:
   NBD endpoint and passes that endpoint to QEMU as the boot disk/CD.
   ISO files are exposed read-only as CD-ROM when the CD-ROM option is enabled.
   Disk images are exposed as writable disks when possible.
-- `Empty CD-ROM no file` - Verifies QEMU display and CD-ROM device behavior
-  without opening a media file.
-- `Null block` - Verifies QEMU block device behavior without a real file.
+- `Video Teste` - Starts QEMU without media to verify emulator video output.
+- `Linux cloud qcow2`, `Ubuntu 10`, `Ubuntu 14`, `Windows 98`, `Windows XP`,
+  and `Windows 7` - Apply target, memory, machine, CPU, video, network, and
+  boot defaults when the selected options are available in the packaged core.
 
 Generated format mapping:
 

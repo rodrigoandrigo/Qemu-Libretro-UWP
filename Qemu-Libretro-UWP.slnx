@@ -4,7 +4,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="Qemu-Libretro-UWP.vcxproj">
+  <Project Path="Qemu-Libretro-UWP.vcxproj" Id="87305b15-63db-467f-a4af-b60278a8349c">
     <Deploy />
   </Project>
 </Solution>

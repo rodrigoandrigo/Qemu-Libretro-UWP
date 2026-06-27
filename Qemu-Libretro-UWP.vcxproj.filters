@@ -8,13 +8,13 @@
       <UniqueIdentifier>2d2a7c3b-afeb-4d00-9e5d-bd9d6d2f1395</UniqueIdentifier>
       <Extensions>bmp;fbx;gif;jpg;jpeg;tga;tiff;tif;png</Extensions>
     </Filter>
-	<Filter Include="Conteúdo">
+    <Filter Include="Conteúdo">
       <UniqueIdentifier>5f06ccba-d17c-4fe2-ad73-139652d8a5b1</UniqueIdentifier>
     </Filter>
     <ClInclude Include="Common\DirectXHelper.h">
       <Filter>Comum</Filter>
     </ClInclude>
-	<ClInclude Include="Common\StepTimer.h">
+    <ClInclude Include="Common\StepTimer.h">
       <Filter>Comum</Filter>
     </ClInclude>
     <ClInclude Include="Common\DeviceResources.h">
@@ -23,7 +23,7 @@
     <ClCompile Include="Common\DeviceResources.cpp">
       <Filter>Comum</Filter>
     </ClCompile>
-	<ClInclude Include="Content\Sample3DSceneRenderer.h">
+    <ClInclude Include="Content\Sample3DSceneRenderer.h">
       <Filter>Conteúdo</Filter>
     </ClInclude>
     <ClInclude Include="Content\SampleFpsTextRenderer.h">
@@ -32,13 +32,13 @@
     <ClInclude Include="Content\ShaderStructures.h">
       <Filter>Conteúdo</Filter>
     </ClInclude>
-	<ClCompile Include="Content\Sample3DSceneRenderer.cpp">
+    <ClCompile Include="Content\Sample3DSceneRenderer.cpp">
       <Filter>Conteúdo</Filter>
     </ClCompile>
     <ClCompile Include="Content\SampleFpsTextRenderer.cpp">
       <Filter>Conteúdo</Filter>
     </ClCompile>
-	<FxCompile Include="Content\SamplePixelShader.hlsl">
+    <FxCompile Include="Content\SamplePixelShader.hlsl">
       <Filter>Conteúdo</Filter>
     </FxCompile>
     <FxCompile Include="Content\SampleVertexShader.hlsl">
@@ -61,6 +61,189 @@
     </Image>
     <Image Include="Assets\Wide310x150Logo.scale-200.png">
       <Filter>Ativos</Filter>
+    </Image>
+    <Filter Include="Assets">
+      <UniqueIdentifier>{1feff5ae-bb28-4538-8e6b-cfd24e9f82e8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Content\LibretroFramePixelShader.hlsl" />
+    <FxCompile Include="Content\LibretroFrameVertexShader.hlsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Content\LibretroFrameRenderer.cpp" />
+    <ClCompile Include="LibretroCore.cpp" />
+    <ClCompile Include="LibretroHost.cpp" />
+    <ClCompile Include="Qemu_Libretro_UWPMain.cpp" />
+    <ClCompile Include="pch.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Content\LibretroFrameRenderer.h" />
+    <ClInclude Include="LibretroApi.h" />
+    <ClInclude Include="LibretroCore.h" />
+    <ClInclude Include="LibretroHost.h" />
+    <ClInclude Include="Qemu_Libretro_UWPMain.h" />
+    <ClInclude Include="pch.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Page Include="DirectXPage.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="Assets\SmallTile.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SmallTile.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SmallTile.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SmallTile.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SmallTile.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square150x150Logo.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Wide310x150Logo.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\LargeTile.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\LargeTile.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\LargeTile.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\LargeTile.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\LargeTile.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.targetsize-16.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.targetsize-24.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.targetsize-32.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.targetsize-48.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.targetsize-256.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-unplated_targetsize-16.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-unplated_targetsize-32.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-unplated_targetsize-48.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-unplated_targetsize-256.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-lightunplated_targetsize-16.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-lightunplated_targetsize-24.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-lightunplated_targetsize-32.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-lightunplated_targetsize-48.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\Square44x44Logo.altform-lightunplated_targetsize-256.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.scale-400.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\BadgeLogo.scale-100.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\BadgeLogo.scale-125.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\BadgeLogo.scale-150.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\BadgeLogo.scale-200.png">
+      <Filter>Assets</Filter>
+    </Image>
+    <Image Include="Assets\BadgeLogo.scale-400.png">
+      <Filter>Assets</Filter>
     </Image>
   </ItemGroup>
 </Project>
