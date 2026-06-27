@@ -1,0 +1,814 @@
+UWP/Xbox Build Fixes Report
+===========================
+
+Purpose
+-------
+
+This report documents the changes made to support a UWP/Xbox-safe libretro
+build and to address build/runtime issues caused by Win32 desktop API imports.
+
+The main runtime target was Win32 error 127, also known as
+ERROR_PROC_NOT_FOUND. In this context, that error is consistent with a DLL
+loading failure caused by importing procedures that are not available in the
+UWP/Xbox API surface.
+
+The build was also fixed for several follow-up failures discovered while
+building the libretro core on Windows.
+
+
+Files Changed
+-------------
+
+- `meson_options.txt`
+- `meson.build`
+- `scripts/meson-buildoptions.sh`
+- `util/meson.build`
+- `util/coroutine-windows.c`
+- `chardev/meson.build`
+- `chardev/char-win.c`
+- `chardev/char-stdio.c`
+- `chardev/char-console.c`
+- `net/meson.build`
+- `net/tap-stub.c`
+- `os-win32.c`
+- `scripts/libretro-prefix-target-lib.py`
+
+
+1. Added a UWP Build Option
+---------------------------
+
+File: `meson_options.txt`
+
+A new Meson option was added:
+
+    option('uwp', type : 'boolean', value : false,
+           description: 'Build Windows targets using UWP/Xbox-safe Win32 APIs')
+
+This enables UWP mode with:
+
+    -Duwp=true
+
+The configure wrapper also exposes:
+
+    --enable-uwp
+
+
+2. Added Configure Support for UWP
+----------------------------------
+
+File: `scripts/meson-buildoptions.sh`
+
+The configure option parser now supports:
+
+    --enable-uwp
+    --disable-uwp
+
+These map to:
+
+    -Duwp=true
+    -Duwp=false
+
+The configure help text was also updated to list the new UWP option.
+
+
+3. Added a Global `win32_uwp` Build Variable
+--------------------------------------------
+
+File: `meson.build`
+
+A global variable was added:
+
+    win32_uwp = get_option('uwp')
+
+This controls UWP-specific source selection, dependencies, and feature
+availability throughout the build.
+
+The build now rejects invalid use of UWP mode on non-Windows targets:
+
+    if win32_uwp and host_os != 'windows'
+      error('-Duwp=true is only supported for Windows targets')
+    endif
+
+
+4. Added `CONFIG_UWP`
+---------------------
+
+File: `meson.build`
+
+The host configuration now exports:
+
+    config_host_data.set('CONFIG_UWP', win32_uwp)
+
+When UWP mode is enabled, C code can use:
+
+    #ifdef CONFIG_UWP
+
+Important detail: QEMU's generated config macros are emitted as defined or
+undefined feature macros, not numeric boolean values. Therefore, the correct C
+guards are:
+
+    #ifdef CONFIG_UWP
+    #ifndef CONFIG_UWP
+
+The incorrect form:
+
+    #if defined(CONFIG_UWP) && CONFIG_UWP
+
+was removed because it fails when `CONFIG_UWP` is defined without a value.
+
+
+5. Linked the Final Core Against `WindowsApp`
+---------------------------------------------
+
+File: `meson.build`
+
+UWP builds now require:
+
+    windowsapp = cc.find_library('WindowsApp', required: true)
+
+The final libretro core link dependencies include `WindowsApp` when UWP mode is
+enabled:
+
+    libretro_core_deps += windowsapp
+
+This ensures the build uses the UWP API surface and fails early if the toolchain
+does not provide `WindowsApp.lib`.
+
+
+6. Removed `winmm` From UWP Builds
+----------------------------------
+
+Files:
+
+- `meson.build`
+- `util/meson.build`
+- `os-win32.c`
+
+Desktop Windows builds used `winmm` and called:
+
+    timeBeginPeriod
+    timeEndPeriod
+    timeGetDevCaps
+
+These are not suitable for the UWP/Xbox build.
+
+Changes made:
+
+- `winmm` is only searched when UWP mode is disabled.
+- `util/meson.build` only links `winmm` when UWP mode is disabled.
+- `os-win32.c` excludes the `mmsystem.h` include and timer-resolution code
+  under `CONFIG_UWP`.
+
+In UWP mode, `os_setup_early_signal_handling()` no longer calls:
+
+    SetConsoleCtrlHandler
+    timeGetDevCaps
+    timeBeginPeriod
+
+
+7. Switched Windows Coroutines to UWP-Safe Fiber APIs
+-----------------------------------------------------
+
+File: `util/coroutine-windows.c`
+
+The Windows coroutine backend previously used:
+
+    CreateFiber
+    ConvertThreadToFiber
+
+Those functions are desktop-only and were strong candidates for causing
+Win32 error 127 in a UWP/Xbox environment.
+
+When `CONFIG_UWP` is enabled, the code now uses:
+
+    CreateFiberEx
+    ConvertThreadToFiberEx
+
+with:
+
+    FIBER_FLAG_FLOAT_SWITCH
+
+Desktop Windows builds still use the original functions to avoid changing
+normal desktop behavior.
+
+
+8. Disabled DirectSound for UWP
+-------------------------------
+
+File: `meson.build`
+
+DirectSound pulls in desktop-oriented APIs such as:
+
+    GetDesktopWindow
+    CoInitialize
+    CoCreateInstance
+
+UWP builds now reject explicit DirectSound enablement:
+
+    -Ddsound=enabled
+
+with:
+
+    DirectSound is not available for UWP/Xbox builds
+
+DirectSound is also not autodetected or linked when UWP mode is enabled.
+
+The libretro build continues to use:
+
+    --audio-drv-list=libretro
+
+
+9. Disabled QEMU Guest Agent for UWP
+------------------------------------
+
+File: `meson.build`
+
+The Windows QEMU Guest Agent can pull in registry, COM, VSS, and other desktop
+APIs.
+
+UWP builds now disable guest-agent autodetection and reject explicit guest-agent
+enablement:
+
+    QEMU guest agent is not available for UWP/Xbox builds
+
+This prevents QGA/VSS code from entering the UWP build.
+
+
+10. Made Win32 Chardevs UWP-Safe
+--------------------------------
+
+Files:
+
+- `chardev/meson.build`
+- `chardev/char-win.c`
+- `chardev/char-stdio.c`
+- `chardev/char-console.c`
+
+Problematic desktop APIs included:
+
+    GetDefaultCommConfig
+    CommConfigDialog
+    ReadConsoleInput
+
+Changes made:
+
+1. `chardev/meson.build`
+
+   `char-win-stdio.c` is only compiled when UWP mode is disabled.
+
+2. `chardev/char-win.c`
+
+   In UWP mode, serial chardev initialization returns:
+
+       serial chardev is not supported in UWP builds
+
+   This avoids importing `CommConfigDialog` and `GetDefaultCommConfig`.
+
+3. `chardev/char-stdio.c`
+
+   In UWP mode, stdio chardev opening returns:
+
+       stdio chardev is not supported in UWP builds
+
+   The type no longer inherits from `TYPE_CHARDEV_WIN_STDIO` in UWP mode,
+   because `char-win-stdio.c` is not compiled.
+
+4. `chardev/char-console.c`
+
+   In UWP mode, console chardev opening returns:
+
+       console chardev is not supported in UWP builds
+
+
+11. Fixed TAP Selection for UWP
+-------------------------------
+
+Files:
+
+- `net/meson.build`
+- `net/tap-stub.c`
+
+Original issue:
+
+When `host_os == 'windows'` and `uwp == true`, the source selection skipped
+`tap-win32.c` but fell through to the generic fallback:
+
+    system_ss.add(files('tap.c', 'tap-stub.c'))
+
+That compiled `net/tap.c`, which is POSIX-specific and includes:
+
+    sys/ioctl.h
+
+Fix:
+
+Windows source selection is now explicit:
+
+    if host_os == 'windows'
+      if win32_uwp
+        system_ss.add(files('tap-stub.c'))
+      else
+        system_ss.add(files('tap-win32.c'))
+      endif
+
+The generic fallback was also changed to compile only:
+
+    tap-stub.c
+
+This avoids compiling `tap.c` on unsupported platforms and avoids duplicate
+symbols after expanding `tap-stub.c`.
+
+`tap-stub.c` now implements:
+
+    net_init_tap()
+    tap_enable()
+    tap_disable()
+    tap_get_fd()
+    tap_get_vhost_net()
+
+Result:
+
+In UWP mode, `-netdev tap` fails cleanly with:
+
+    tap is not supported in this build
+
+without pulling in POSIX TAP code or Windows TAP registry/device APIs.
+
+
+12. Fixed Duplicate Python Invocation in Meson
+----------------------------------------------
+
+File: `meson.build`
+
+Original failing command shape:
+
+    python.exe python.exe scripts/libretro-prefix-target-lib.py ...
+
+The first Python process attempted to read the second `python.exe` binary as a
+Python source file, causing:
+
+    SyntaxError: Non-UTF-8 code starting with '\x90'
+
+Cause:
+
+The custom target used:
+
+    command: [
+      python,
+      prefix_script,
+      ...
+    ]
+
+On Windows, `find_program('scripts/libretro-prefix-target-lib.py')` already
+resolves the script through Python.
+
+Fix:
+
+The explicit `python` entry was removed. The command now starts with:
+
+    command: [
+      prefix_script,
+      host_os,
+      nm,
+      objcopy,
+      ...
+    ]
+
+
+13. Fixed `WinError 206` in `objcopy`
+-------------------------------------
+
+File: `scripts/libretro-prefix-target-lib.py`
+
+Original error:
+
+    FileNotFoundError: [WinError 206]
+
+Cause:
+
+The script already passed symbol renames through a temporary file:
+
+    --redefine-syms=<file>
+
+However, it still passed a very large number of:
+
+    --rename-section old=new
+
+arguments directly on the command line. This exceeded the Windows command-line
+length limit.
+
+Fix:
+
+The script now:
+
+1. Keeps `--redefine-syms` in a temporary file.
+2. Splits `--rename-section` arguments into smaller batches.
+3. Runs `objcopy` in multiple passes.
+4. Uses a temporary directory for intermediate archives.
+
+New helper functions:
+
+    section_args()
+    section_chunks()
+    run_objcopy()
+
+The default section-rename batch limit is:
+
+    max_len=24000
+
+This keeps each `objcopy` invocation below the Windows command-line limit.
+
+
+14. Recommended UWP Build Command
+---------------------------------
+
+The UWP build should keep the default libretro build settings and add:
+
+    --enable-uwp
+
+Example:
+
+    cd qemu-libretro
+
+    cd zlib
+    ./configure
+    cd ..
+
+    rm -rf build
+    mkdir build
+    cd build
+
+    CFLAGS="-Os -Wno-error -Wno-nested-externs -Wno-redundant-decls" ../configure \
+      --target-list="aarch64-softmmu alpha-softmmu arm-softmmu i386-softmmu m68k-softmmu mips64el-softmmu mips64-softmmu mipsel-softmmu mips-softmmu ppc64-softmmu ppc-softmmu riscv32-softmmu riscv64-softmmu s390x-softmmu sparc64-softmmu sparc-softmmu x86_64-softmmu" \
+      --without-default-features \
+      --glib=internal \
+      --zlib=internal \
+      --disable-pie \
+      --enable-fdt=internal \
+      --disable-modules \
+      --disable-plugins \
+      --enable-libretro \
+      --audio-drv-list=libretro \
+      --disable-sdl \
+      --enable-uwp \
+      -Dwrap_mode=forcefallback
+
+    make -j8 libqemu_libretro.dll
+
+    strip --strip-unneeded libqemu_libretro.dll
+
+Note:
+
+The UWP build requires a Windows/UWP-capable toolchain with `WindowsApp.lib`
+available. A normal desktop MinGW configuration is not equivalent to a true UWP
+toolchain.
+
+
+15. Expected Behavior in UWP Mode
+---------------------------------
+
+When `-Duwp=true` is enabled:
+
+- Coroutines use `CreateFiberEx` and `ConvertThreadToFiberEx`.
+- `winmm` is not linked.
+- DirectSound is not enabled.
+- QGA/VSS is not enabled.
+- TAP uses the unsupported stub and does not compile POSIX or Win32 TAP code.
+- Serial, stdio, and console chardevs fail cleanly if used.
+- The final libretro core links against `WindowsApp`.
+- The libretro prefixing script does not invoke Python twice.
+- The libretro prefixing script avoids `WinError 206` by chunking `objcopy`
+  section rename arguments.
+
+
+16. Errors Addressed
+--------------------
+
+Error 1:
+
+    Win32 error 127 / ERROR_PROC_NOT_FOUND
+
+Likely cause:
+
+    Desktop Win32 imports in a DLL loaded in a UWP/Xbox environment.
+
+Mitigation:
+
+    Desktop-only APIs are removed, disabled, or guarded out in UWP mode.
+
+
+Error 2:
+
+    error: operator '&&' has no right operand
+
+Cause:
+
+    `CONFIG_UWP` is a feature macro without a numeric value.
+
+Fix:
+
+    Use `#ifdef CONFIG_UWP` and `#ifndef CONFIG_UWP`.
+
+
+Error 3:
+
+    `net/tap.c` includes `sys/ioctl.h` in a Windows UWP build.
+
+Cause:
+
+    Windows UWP fell through to the generic TAP source selection.
+
+Fix:
+
+    Windows UWP now compiles only `tap-stub.c`.
+
+
+Error 4:
+
+    SyntaxError: Non-UTF-8 code starting with '\x90' in python.exe
+
+Cause:
+
+    The Meson custom target invoked Python twice.
+
+Fix:
+
+    Remove the explicit Python executable from the custom target command.
+
+
+Error 5:
+
+    FileNotFoundError: [WinError 206]
+
+Cause:
+
+    The `objcopy` command line was too long on Windows.
+
+Fix:
+
+    Split `--rename-section` arguments across multiple `objcopy` invocations.
+
+
+17. MSYS2 installed packages
+--------------------
+
+base
+base-devel
+bash
+bash-completion
+binutils
+bison
+brotli
+bsdtar
+bzip2
+ca-certificates
+coreutils
+curl
+dash
+db
+diffstat
+diffutils
+dos2unix
+file
+filesystem
+findutils
+flex
+gawk
+gcc-libs
+gdbm
+getent
+gettext
+git
+gmp
+gnupg
+grep
+gzip
+heimdal
+heimdal-libs
+inetutils
+info
+less
+libargp
+libasprintf
+libassuan
+libbz2
+libcbor
+libcurl
+libdb
+libedit
+libexpat
+libffi
+libfido2
+libgcrypt
+libgdbm
+libgettextpo
+libgnutls
+libgpg-error
+libhogweed
+libiconv
+libidn2
+libintl
+libksba
+liblz4
+liblzma
+libnettle
+libnghttp2
+libnghttp3
+libngtcp2
+libnpth
+libopenssl
+libp11-kit
+libpcre
+libpcre2_8
+libpsl
+libreadline
+libsqlite
+libssh2
+libtasn1
+libunistring
+libutil-linux
+libxcrypt
+libzstd
+m4
+make
+mingw-w64-ucrt-x86_64-adwaita-icon-theme
+mingw-w64-ucrt-x86_64-adwaita-icon-theme-legacy
+mingw-w64-ucrt-x86_64-atk
+mingw-w64-ucrt-x86_64-binutils
+mingw-w64-ucrt-x86_64-brotli
+mingw-w64-ucrt-x86_64-bzip2
+mingw-w64-ucrt-x86_64-cairo
+mingw-w64-ucrt-x86_64-crt
+mingw-w64-ucrt-x86_64-egl-headers
+mingw-w64-ucrt-x86_64-expat
+mingw-w64-ucrt-x86_64-fontconfig
+mingw-w64-ucrt-x86_64-freetype
+mingw-w64-ucrt-x86_64-fribidi
+mingw-w64-ucrt-x86_64-gcc
+mingw-w64-ucrt-x86_64-gcc-libs
+mingw-w64-ucrt-x86_64-gdb
+mingw-w64-ucrt-x86_64-gdb-multiarch
+mingw-w64-ucrt-x86_64-gdk-pixbuf2
+mingw-w64-ucrt-x86_64-gettext-runtime
+mingw-w64-ucrt-x86_64-giflib
+mingw-w64-ucrt-x86_64-gles-headers
+mingw-w64-ucrt-x86_64-glib2
+mingw-w64-ucrt-x86_64-gmp
+mingw-w64-ucrt-x86_64-gnutls
+mingw-w64-ucrt-x86_64-graphite2
+mingw-w64-ucrt-x86_64-gtk-update-icon-cache
+mingw-w64-ucrt-x86_64-gtk3
+mingw-w64-ucrt-x86_64-harfbuzz
+mingw-w64-ucrt-x86_64-headers
+mingw-w64-ucrt-x86_64-hicolor-icon-theme
+mingw-w64-ucrt-x86_64-isl
+mingw-w64-ucrt-x86_64-jbigkit
+mingw-w64-ucrt-x86_64-json-glib
+mingw-w64-ucrt-x86_64-lerc
+mingw-w64-ucrt-x86_64-libb2
+mingw-w64-ucrt-x86_64-libdatrie
+mingw-w64-ucrt-x86_64-libdeflate
+mingw-w64-ucrt-x86_64-libepoxy
+mingw-w64-ucrt-x86_64-libffi
+mingw-w64-ucrt-x86_64-libgcrypt
+mingw-w64-ucrt-x86_64-libgpg-error
+mingw-w64-ucrt-x86_64-libiconv
+mingw-w64-ucrt-x86_64-libidn2
+mingw-w64-ucrt-x86_64-libjpeg-turbo
+mingw-w64-ucrt-x86_64-libmangle
+mingw-w64-ucrt-x86_64-libnfs
+mingw-w64-ucrt-x86_64-libpng
+mingw-w64-ucrt-x86_64-librsvg
+mingw-w64-ucrt-x86_64-libslirp
+mingw-w64-ucrt-x86_64-libssh
+mingw-w64-ucrt-x86_64-libsystre
+mingw-w64-ucrt-x86_64-libtasn1
+mingw-w64-ucrt-x86_64-libthai
+mingw-w64-ucrt-x86_64-libtiff
+mingw-w64-ucrt-x86_64-libtre
+mingw-w64-ucrt-x86_64-libunistring
+mingw-w64-ucrt-x86_64-libusb
+mingw-w64-ucrt-x86_64-libwebp
+mingw-w64-ucrt-x86_64-libwinpthread
+mingw-w64-ucrt-x86_64-libxml2
+mingw-w64-ucrt-x86_64-lzo2
+mingw-w64-ucrt-x86_64-make
+mingw-w64-ucrt-x86_64-meson
+mingw-w64-ucrt-x86_64-mpc
+mingw-w64-ucrt-x86_64-mpdecimal
+mingw-w64-ucrt-x86_64-mpfr
+mingw-w64-ucrt-x86_64-ncurses
+mingw-w64-ucrt-x86_64-nettle
+mingw-w64-ucrt-x86_64-ninja
+mingw-w64-ucrt-x86_64-openssl
+mingw-w64-ucrt-x86_64-p11-kit
+mingw-w64-ucrt-x86_64-pango
+mingw-w64-ucrt-x86_64-pcre2
+mingw-w64-ucrt-x86_64-pixman
+mingw-w64-ucrt-x86_64-pkgconf
+mingw-w64-ucrt-x86_64-python
+mingw-w64-ucrt-x86_64-python-babel
+mingw-w64-ucrt-x86_64-python-certifi
+mingw-w64-ucrt-x86_64-python-charset-normalizer
+mingw-w64-ucrt-x86_64-python-colorama
+mingw-w64-ucrt-x86_64-python-distlib
+mingw-w64-ucrt-x86_64-python-docutils
+mingw-w64-ucrt-x86_64-python-idna
+mingw-w64-ucrt-x86_64-python-imagesize
+mingw-w64-ucrt-x86_64-python-jinja
+mingw-w64-ucrt-x86_64-python-markupsafe
+mingw-w64-ucrt-x86_64-python-packaging
+mingw-w64-ucrt-x86_64-python-pip
+mingw-w64-ucrt-x86_64-python-pygments
+mingw-w64-ucrt-x86_64-python-requests
+mingw-w64-ucrt-x86_64-python-roman-numerals
+mingw-w64-ucrt-x86_64-python-setuptools
+mingw-w64-ucrt-x86_64-python-snowballstemmer
+mingw-w64-ucrt-x86_64-python-sphinx
+mingw-w64-ucrt-x86_64-python-sphinx-alabaster-theme
+mingw-w64-ucrt-x86_64-python-sphinx_rtd_theme
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-applehelp
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-devhelp
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-htmlhelp
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-jquery
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-jsmath
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-qthelp
+mingw-w64-ucrt-x86_64-python-sphinxcontrib-serializinghtml
+mingw-w64-ucrt-x86_64-python-tomli
+mingw-w64-ucrt-x86_64-python-urllib3
+mingw-w64-ucrt-x86_64-python-wheel
+mingw-w64-ucrt-x86_64-readline
+mingw-w64-ucrt-x86_64-shared-mime-info
+mingw-w64-ucrt-x86_64-sqlite3
+mingw-w64-ucrt-x86_64-tcl
+mingw-w64-ucrt-x86_64-termcap
+mingw-w64-ucrt-x86_64-tk
+mingw-w64-ucrt-x86_64-tools
+mingw-w64-ucrt-x86_64-tzdata
+mingw-w64-ucrt-x86_64-vulkan-loader
+mingw-w64-ucrt-x86_64-windows-default-manifest
+mingw-w64-ucrt-x86_64-wineditline
+mingw-w64-ucrt-x86_64-winpthreads
+mingw-w64-ucrt-x86_64-winstorecompat
+mingw-w64-ucrt-x86_64-xxhash
+mingw-w64-ucrt-x86_64-xz
+mingw-w64-ucrt-x86_64-zlib
+mingw-w64-ucrt-x86_64-zstd
+mintty
+mpfr
+msys2-keyring
+msys2-launcher
+msys2-runtime
+nano
+ncurses
+nettle
+openssh
+openssl
+p11-kit
+pacman
+pacman-contrib
+pacman-mirrors
+patch
+perl
+perl-Authen-SASL
+perl-Clone
+perl-Convert-BinHex
+perl-Encode-Locale
+perl-Error
+perl-File-Listing
+perl-HTML-Parser
+perl-HTML-Tagset
+perl-HTTP-Cookies
+perl-HTTP-Daemon
+perl-HTTP-Date
+perl-HTTP-Message
+perl-HTTP-Negotiate
+perl-IO-HTML
+perl-IO-Socket-SSL
+perl-IO-Stringy
+perl-LWP-MediaTypes
+perl-MIME-tools
+perl-MailTools
+perl-Net-HTTP
+perl-Net-SMTP-SSL
+perl-Net-SSLeay
+perl-TermReadKey
+perl-TimeDate
+perl-Try-Tiny
+perl-URI
+perl-WWW-RobotRules
+perl-http-cookiejar
+perl-libwww
+pinentry
+rebase
+sed
+tar
+texinfo
+texinfo-tex
+time
+tzcode
+util-linux
+wget
+which
+xz
+zlib
+zstd
