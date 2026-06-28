@@ -410,43 +410,6 @@ namespace
 		return result;
 	}
 
-	std::set<std::string> ExtractAsciiTokens(const std::vector<unsigned char>& data)
-	{
-		std::set<std::string> tokens;
-		std::string current;
-		for (unsigned char value : data)
-		{
-			bool tokenChar =
-				(value >= 'a' && value <= 'z') ||
-				(value >= 'A' && value <= 'Z') ||
-				(value >= '0' && value <= '9') ||
-				value == '_' ||
-				value == '-' ||
-				value == '.' ||
-				value == ',';
-			if (tokenChar)
-			{
-				if (current.size() < 96)
-				{
-					current.push_back(static_cast<char>(value));
-				}
-			}
-			else
-			{
-				if (current.size() >= 2)
-				{
-					tokens.insert(current);
-				}
-				current.clear();
-			}
-		}
-		if (current.size() >= 2)
-		{
-			tokens.insert(current);
-		}
-		return tokens;
-	}
-
 	void AppendCandidates(std::vector<const wchar_t*>& target, const std::vector<const wchar_t*>& source)
 	{
 		for (const wchar_t* value : source)
@@ -837,6 +800,8 @@ DirectXPage::DirectXPage():
 	m_updatingQemuOptionLists(false),
 	m_updatingProfileList(false),
 	m_applyingProfile(false),
+	m_packageFirmwarePathCacheLoaded(false),
+	m_packageFirmwarePathCacheLoading(false),
 	m_coreDllOptionsLoaded(false),
 	m_coreDllOptionsLoading(false),
 	m_isStarting(false),
@@ -1663,6 +1628,7 @@ void DirectXPage::ClearErrorLogButton_Click(Object^ sender, RoutedEventArgs^ e)
 	(void)sender;
 	(void)e;
 
+	m_errorLogText.clear();
 	if (errorLogBox != nullptr)
 	{
 		errorLogBox->Text = "No errors recorded.";
@@ -1893,26 +1859,6 @@ void DirectXPage::MemorySlider_ValueChanged(Object^ sender, RangeBaseValueChange
 			std::wstring text = std::to_wstring(memoryMb);
 			text += L" MB";
 			memoryValueText->Text = ref new String(text.c_str());
-		}
-	}
-	RefreshCommandLinePreview();
-}
-
-void DirectXPage::SmpSlider_ValueChanged(Object^ sender, RangeBaseValueChangedEventArgs^ e)
-{
-	(void)sender;
-	int smpCount = static_cast<int>(e->NewValue + 0.5);
-	if (smpValueText != nullptr)
-	{
-		if (smpCount <= 0)
-		{
-			smpValueText->Text = "Default";
-		}
-		else
-		{
-			std::wstring text = std::to_wstring(smpCount);
-			text += smpCount == 1 ? L" CPU" : L" CPUs";
-			smpValueText->Text = ref new String(text.c_str());
 		}
 	}
 	RefreshCommandLinePreview();
@@ -2264,27 +2210,26 @@ void DirectXPage::AppendError(const std::wstring& text)
 			WideCharToMultiByte(CP_UTF8, 0, line.c_str(), static_cast<int>(line.size()), &utf8[0], size, nullptr, nullptr);
 			DWORD written = 0;
 			WriteFile(logFile, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
-			FlushFileBuffers(logFile);
 		}
 		CloseHandle(logFile);
 	}
 
-	if (errorLogBox->Text == "No errors recorded.")
+	if (!m_errorLogText.empty())
 	{
-		errorLogBox->Text = "";
+		m_errorLogText += L"\r\n";
 	}
-
-	std::wstring current(errorLogBox->Text->Data());
-	if (!current.empty())
-	{
-		current += L"\r\n";
-	}
-	current += text;
-	errorLogBox->Text = ref new String(current.c_str());
+	m_errorLogText += text;
+	errorLogBox->Text = ref new String(m_errorLogText.c_str());
 }
 
 void DirectXPage::RefreshBootMediaState()
 {
+	if (m_updatingBootMediaLists)
+	{
+		return;
+	}
+
+	m_updatingBootMediaLists = true;
 	auto local = ApplicationData::Current->LocalFolder;
 	Concurrency::create_task(local->CreateFolderAsync("boot_media", CreationCollisionOption::OpenIfExists)).then(
 		[](StorageFolder^ folder)
@@ -2303,7 +2248,6 @@ void DirectXPage::RefreshBootMediaState()
 			int driveCount = 0;
 			int cdromCount = 0;
 
-			m_updatingBootMediaLists = true;
 			driveBootMediaBox->Items->Clear();
 			cdromBootMediaBox->Items->Clear();
 
@@ -2408,6 +2352,10 @@ void DirectXPage::RefreshFirmwarePathSelectors()
 	{
 		return;
 	}
+	if (m_updatingFirmwarePathLists)
+	{
+		return;
+	}
 
 	m_updatingFirmwarePathLists = true;
 	auto resetBox = [](ComboBox^ box, const wchar_t* defaultText)
@@ -2424,7 +2372,110 @@ void DirectXPage::RefreshFirmwarePathSelectors()
 	resetBox(initrdPathSelectorBox, L"Select initrd");
 	resetBox(dtbPathSelectorBox, L"Select DTB");
 
-	auto addFiles = [this](Windows::Foundation::Collections::IVectorView<StorageFile^>^ files, const wchar_t* prefix, bool packageFiles)
+	auto addEntry = [this](const std::wstring& name, const std::wstring& display, const std::wstring& path, bool packageFiles)
+	{
+		if (path.empty())
+		{
+			return;
+		}
+
+		if (packageFiles || !HasExtension(name, L".qemu_cmd_line"))
+		{
+			if (IsQemuFirmwareName(name))
+			{
+				AddFirmwarePathItem(biosPathSelectorBox, display, path);
+			}
+			if (IsKernelBootName(name))
+			{
+				AddFirmwarePathItem(kernelPathSelectorBox, display, path);
+			}
+			if (IsInitrdBootName(name))
+			{
+				AddFirmwarePathItem(initrdPathSelectorBox, display, path);
+			}
+			if (HasExtension(name, L".dtb"))
+			{
+				AddFirmwarePathItem(dtbPathSelectorBox, display, path);
+			}
+		}
+	};
+
+	if (!m_packageFirmwarePathCacheLoaded)
+	{
+		if (m_packageFirmwarePathCacheLoading)
+		{
+			m_updatingFirmwarePathLists = false;
+			return;
+		}
+
+		m_packageFirmwarePathCacheLoading = true;
+		Concurrency::create_task(Package::Current->InstalledLocation->GetFolderAsync("qemu")).then([](Concurrency::task<StorageFolder^> folderTask)
+		{
+			try
+			{
+				return Concurrency::create_task(folderTask.get()->GetFilesAsync());
+			}
+			catch (...)
+			{
+				return Concurrency::task_from_result<Windows::Foundation::Collections::IVectorView<StorageFile^>^>(nullptr);
+			}
+		}).then([](Concurrency::task<Windows::Foundation::Collections::IVectorView<StorageFile^>^> qemuFilesTask)
+		{
+			std::vector<FirmwarePathCacheEntry> entries;
+			try
+			{
+				auto files = qemuFilesTask.get();
+				if (files != nullptr)
+				{
+					for each (StorageFile^ file in files)
+					{
+						if (file == nullptr || file->Name == nullptr || file->Path == nullptr)
+						{
+							continue;
+						}
+
+						std::wstring name(file->Name->Data());
+						if (!IsQemuFirmwareName(name) && !IsKernelBootName(name) && !IsInitrdBootName(name) && !HasExtension(name, L".dtb"))
+						{
+							continue;
+						}
+
+						FirmwarePathCacheEntry entry;
+						entry.name = name;
+						entry.display = L"qemu\\";
+						entry.display += name;
+						entry.path = file->Path->Data();
+						entries.push_back(entry);
+					}
+				}
+			}
+			catch (...)
+			{
+			}
+			return entries;
+		}).then([this](Concurrency::task<std::vector<FirmwarePathCacheEntry>> entriesTask)
+		{
+			try
+			{
+				m_packageFirmwarePathCache = entriesTask.get();
+				m_packageFirmwarePathCacheLoaded = true;
+			}
+			catch (...)
+			{
+			}
+			m_packageFirmwarePathCacheLoading = false;
+			m_updatingFirmwarePathLists = false;
+			RefreshFirmwarePathSelectors();
+		});
+		return;
+	}
+
+	for (const FirmwarePathCacheEntry& entry : m_packageFirmwarePathCache)
+	{
+		addEntry(entry.name, entry.display, entry.path, true);
+	}
+
+	auto addFiles = [addEntry](Windows::Foundation::Collections::IVectorView<StorageFile^>^ files, const wchar_t* prefix, bool packageFiles)
 	{
 		if (files == nullptr)
 		{
@@ -2442,71 +2493,12 @@ void DirectXPage::RefreshFirmwarePathSelectors()
 			std::wstring path(file->Path->Data());
 			std::wstring display(prefix);
 			display += name;
-
-			if (packageFiles)
-			{
-				if (IsQemuFirmwareName(name))
-				{
-					AddFirmwarePathItem(biosPathSelectorBox, display, path);
-				}
-				if (IsKernelBootName(name))
-				{
-					AddFirmwarePathItem(kernelPathSelectorBox, display, path);
-				}
-				if (IsInitrdBootName(name))
-				{
-					AddFirmwarePathItem(initrdPathSelectorBox, display, path);
-				}
-				if (HasExtension(name, L".dtb"))
-				{
-					AddFirmwarePathItem(dtbPathSelectorBox, display, path);
-				}
-			}
-			else if (!IsCommandLineFile(file))
-			{
-				if (IsQemuFirmwareName(name))
-				{
-					AddFirmwarePathItem(biosPathSelectorBox, display, path);
-				}
-				if (IsKernelBootName(name))
-				{
-					AddFirmwarePathItem(kernelPathSelectorBox, display, path);
-				}
-				if (IsInitrdBootName(name))
-				{
-					AddFirmwarePathItem(initrdPathSelectorBox, display, path);
-				}
-				if (HasExtension(name, L".dtb"))
-				{
-					AddFirmwarePathItem(dtbPathSelectorBox, display, path);
-				}
-			}
+			addEntry(name, display, path, packageFiles);
 		}
 	};
 
-	Concurrency::create_task(Package::Current->InstalledLocation->GetFolderAsync("qemu")).then([](Concurrency::task<StorageFolder^> folderTask)
-	{
-		try
-		{
-			return Concurrency::create_task(folderTask.get()->GetFilesAsync());
-		}
-		catch (...)
-		{
-			return Concurrency::task_from_result<Windows::Foundation::Collections::IVectorView<StorageFile^>^>(nullptr);
-		}
-	}).then([this, addFiles](Concurrency::task<Windows::Foundation::Collections::IVectorView<StorageFile^>^> qemuFilesTask)
-	{
-		try
-		{
-			addFiles(qemuFilesTask.get(), L"qemu\\", true);
-		}
-		catch (...)
-		{
-		}
-
-		auto local = ApplicationData::Current->LocalFolder;
-		return Concurrency::create_task(local->CreateFolderAsync("boot_media", CreationCollisionOption::OpenIfExists));
-	}).then([](StorageFolder^ folder)
+	auto local = ApplicationData::Current->LocalFolder;
+	Concurrency::create_task(local->CreateFolderAsync("boot_media", CreationCollisionOption::OpenIfExists)).then([](StorageFolder^ folder)
 	{
 		return Concurrency::create_task(folder->GetFilesAsync());
 	}).then([this, addFiles](Concurrency::task<Windows::Foundation::Collections::IVectorView<StorageFile^>^> bootFilesTask)
@@ -2775,8 +2767,17 @@ void DirectXPage::RefreshQemuOptionSelectors()
 	std::wstring dllPath(Package::Current->InstalledLocation->Path->Data());
 	dllPath += L"\\qemu_libretro.dll";
 	auto tokens = std::make_shared<std::set<std::string>>();
+	auto requiredTokens = std::make_shared<std::set<std::string>>();
+	for (const wchar_t* candidate : AllQemuOptionCandidates())
+	{
+		std::string narrow = NarrowAscii(candidate);
+		if (!narrow.empty())
+		{
+			requiredTokens->insert(narrow);
+		}
+	}
 	auto dispatcher = Dispatcher;
-	Concurrency::create_task([this, dllPath, tokens, dispatcher]()
+	Concurrency::create_task([this, dllPath, tokens, requiredTokens, dispatcher]()
 	{
 		auto reportProgress = [this, dispatcher](double percent, const wchar_t* text)
 		{
@@ -2803,35 +2804,73 @@ void DirectXPage::RefreshQemuOptionSelectors()
 			return;
 		}
 
-		reportProgress(10.0, L"Reading selectors");
-		std::vector<unsigned char> data(static_cast<size_t>(size.QuadPart));
-		DWORD totalRead = 0;
+		reportProgress(10.0, L"Scanning selectors");
+		std::vector<unsigned char> buffer(1024 * 1024);
+		std::string currentToken;
+		uint64_t totalRead = 0;
 		DWORD chunkRead = 0;
 		double lastReported = 10.0;
-		while (totalRead < data.size())
+		auto flushToken = [&]()
 		{
-			DWORD remaining = static_cast<DWORD>((std::min)(data.size() - totalRead, static_cast<size_t>(1024 * 1024)));
-			if (!ReadFile(dll, data.data() + totalRead, remaining, &chunkRead, nullptr) || chunkRead == 0)
+			if (currentToken.size() >= 2 && requiredTokens->find(currentToken) != requiredTokens->end())
 			{
-				data.clear();
+				tokens->insert(currentToken);
+			}
+			currentToken.clear();
+		};
+
+		while (totalRead < static_cast<uint64_t>(size.QuadPart))
+		{
+			DWORD remaining = static_cast<DWORD>((std::min)(static_cast<uint64_t>(buffer.size()), static_cast<uint64_t>(size.QuadPart) - totalRead));
+			if (!ReadFile(dll, buffer.data(), remaining, &chunkRead, nullptr) || chunkRead == 0)
+			{
+				tokens->clear();
 				break;
 			}
 			totalRead += chunkRead;
-			double readProgress = 10.0 + (static_cast<double>(totalRead) * 65.0 / static_cast<double>(data.size()));
-			if (readProgress - lastReported >= 5.0 || totalRead >= data.size())
+
+			for (DWORD i = 0; i < chunkRead; i++)
+			{
+				unsigned char value = buffer[i];
+				bool tokenChar =
+					(value >= 'a' && value <= 'z') ||
+					(value >= 'A' && value <= 'Z') ||
+					(value >= '0' && value <= '9') ||
+					value == '_' ||
+					value == '-' ||
+					value == '.' ||
+					value == ',';
+				if (tokenChar)
+				{
+					if (currentToken.size() < 96)
+					{
+						currentToken.push_back(static_cast<char>(value));
+					}
+				}
+				else
+				{
+					flushToken();
+				}
+			}
+			if (tokens->size() >= requiredTokens->size())
+			{
+				break;
+			}
+
+			double readProgress = 10.0 + (static_cast<double>(totalRead) * 85.0 / static_cast<double>(size.QuadPart));
+			if (readProgress - lastReported >= 5.0 || totalRead >= static_cast<uint64_t>(size.QuadPart))
 			{
 				lastReported = readProgress;
-				reportProgress(readProgress, L"Reading selectors");
+				reportProgress(readProgress, L"Scanning selectors");
 			}
 		}
 		CloseHandle(dll);
-		if (data.empty())
+		flushToken();
+		if (tokens->empty())
 		{
 			return;
 		}
 
-		reportProgress(80.0, L"Scanning selectors");
-		*tokens = ExtractAsciiTokens(data);
 		reportProgress(tokens->empty() ? 0.0 : 95.0, tokens->empty() ? L"Selectors unavailable" : L"Preparing selectors");
 	}).then([this, dispatcher, tokens]()
 	{
@@ -3187,9 +3226,10 @@ void DirectXPage::ApplySelectedProfile()
 	{
 		memorySlider->Value = memoryMb;
 	}
-	if (smpCount >= 0 && smpSlider != nullptr)
+	if (smpCount >= 0 && smpBox != nullptr)
 	{
-		smpSlider->Value = smpCount;
+		std::wstring smpValue = std::to_wstring(smpCount);
+		SelectComboValue(smpBox, smpValue.c_str());
 	}
 	PopulateQemuOptionSelectors();
 	SelectComboValue(machineBox, machine);
@@ -3316,12 +3356,8 @@ void DirectXPage::ResetCommandDefaults()
 	{
 		memorySlider->Value = GetTargetProfile(L"x86_64").memoryMb;
 	}
-	if (smpSlider != nullptr)
-	{
-		smpSlider->Value = 1;
-	}
+	resetCombo(smpBox);
 	RefreshBootMediaState();
-	RefreshFirmwarePathSelectors();
 	RefreshQemuOptionSelectors();
 	UpdateCommandPreview();
 }
@@ -3786,11 +3822,11 @@ String^ DirectXPage::BuildAutomaticCommandLine()
 		command += L"M";
 	}
 
-	int smpCount = smpSlider != nullptr ? static_cast<int>(smpSlider->Value + 0.5) : 0;
-	if (smpCount > 0)
+	std::wstring selectedSmp = SelectedComboValue(smpBox);
+	if (!selectedSmp.empty())
 	{
 		command += L" -smp ";
-		command += std::to_wstring(smpCount);
+		command += selectedSmp;
 	}
 
 	std::wstring selectedCpu = SelectedComboValue(cpuBox);

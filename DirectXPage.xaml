@@ -323,14 +323,24 @@
 
                     <StackPanel Spacing="4">
                       <TextBlock Text="SMP" Foreground="White" FontWeight="SemiBold" />
-                      <Grid>
-                        <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="*" />
-                          <ColumnDefinition Width="120" />
-                        </Grid.ColumnDefinitions>
-                        <Slider x:Name="smpSlider" Minimum="1" Maximum="16" Value="1" StepFrequency="1" TickFrequency="4" Foreground="{StaticResource AccentBrush}" ValueChanged="SmpSlider_ValueChanged" />
-                        <TextBlock x:Name="smpValueText" Grid.Column="1" Text="1 CPU" Foreground="White" FontWeight="SemiBold" TextAlignment="Right" VerticalAlignment="Center" />
-                      </Grid>
+                      <ComboBox x:Name="smpBox" Header="CPU count" SelectedIndex="0" Width="180" HorizontalAlignment="Left" SelectionChanged="QemuOption_Changed">
+                        <ComboBoxItem Content="1 CPU" Tag="1" />
+                        <ComboBoxItem Content="2 CPUs" Tag="2" />
+                        <ComboBoxItem Content="3 CPUs" Tag="3" />
+                        <ComboBoxItem Content="4 CPUs" Tag="4" />
+                        <ComboBoxItem Content="5 CPUs" Tag="5" />
+                        <ComboBoxItem Content="6 CPUs" Tag="6" />
+                        <ComboBoxItem Content="7 CPUs" Tag="7" />
+                        <ComboBoxItem Content="8 CPUs" Tag="8" />
+                        <ComboBoxItem Content="9 CPUs" Tag="9" />
+                        <ComboBoxItem Content="10 CPUs" Tag="10" />
+                        <ComboBoxItem Content="11 CPUs" Tag="11" />
+                        <ComboBoxItem Content="12 CPUs" Tag="12" />
+                        <ComboBoxItem Content="13 CPUs" Tag="13" />
+                        <ComboBoxItem Content="14 CPUs" Tag="14" />
+                        <ComboBoxItem Content="15 CPUs" Tag="15" />
+                        <ComboBoxItem Content="16 CPUs" Tag="16" />
+                      </ComboBox>
                       <TextBlock Text="Written as -smp N. The default startup value is 1 CPU." Foreground="{StaticResource MutedTextBrush}" FontSize="12" />
                     </StackPanel>
 

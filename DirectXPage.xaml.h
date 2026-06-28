@@ -31,6 +31,13 @@ namespace Qemu_Libretro_UWP
 		void LoadInternalState(Windows::Foundation::Collections::IPropertySet^ state);
 
 	private:
+		struct FirmwarePathCacheEntry
+		{
+			std::wstring name;
+			std::wstring display;
+			std::wstring path;
+		};
+
 		// Low-level XAML rendering event handler.
 		void OnRendering(Platform::Object^ sender, Platform::Object^ args);
 
@@ -75,7 +82,6 @@ namespace Qemu_Libretro_UWP
 		void QemuOption_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void DiagnosticProfile_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::SelectionChangedEventArgs^ e);
 		void MemorySlider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
-		void SmpSlider_ValueChanged(Platform::Object^ sender, Windows::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs^ e);
 		void AdditionalArguments_Changed(Platform::Object^ sender, Windows::UI::Xaml::Controls::TextChangedEventArgs^ e);
 		void OnKeyDown(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
 		void OnKeyUp(Windows::UI::Core::CoreWindow^ sender, Windows::UI::Core::KeyEventArgs^ args);
@@ -173,9 +179,12 @@ namespace Qemu_Libretro_UWP
 		bool m_updatingQemuOptionLists;
 		bool m_updatingProfileList;
 		bool m_applyingProfile;
+		bool m_packageFirmwarePathCacheLoaded;
+		bool m_packageFirmwarePathCacheLoading;
 		bool m_coreDllOptionsLoaded;
 		bool m_coreDllOptionsLoading;
-		std::vector<unsigned char> m_coreDllData;
+		std::wstring m_errorLogText;
+		std::vector<FirmwarePathCacheEntry> m_packageFirmwarePathCache;
 		std::set<std::string> m_coreDllAsciiTokens;
 		std::map<std::wstring, bool> m_coreDllOptionPresence;
 		std::map<std::wstring, std::map<std::wstring, bool>> m_qemuOptionPresenceByTarget;

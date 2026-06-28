@@ -10,5 +10,9 @@
     <SplashScreenSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</SplashScreenSource>
     <PackageLogoSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</PackageLogoSource>
     <BadgeLogoSource>C:\Users\rodri\Downloads\ChatGPT Image 26 de jun. de 2026, 22_34_40.png</BadgeLogoSource>
+    <UapAppxPackageBuildMode>SideloadOnly</UapAppxPackageBuildMode>
+    <AppxShowAllApps>False</AppxShowAllApps>
+    <AppxBuildConfigurationSelection>x64</AppxBuildConfigurationSelection>
+    <PackageOptionalProjectsInIdeBuilds>False</PackageOptionalProjectsInIdeBuilds>
   </PropertyGroup>
 </Project>

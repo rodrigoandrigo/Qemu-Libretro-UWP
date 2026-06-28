@@ -246,4 +246,7 @@
       <Filter>Assets</Filter>
     </Image>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Qemu-Libretro-UWP_TemporaryKey.pfx" />
+  </ItemGroup>
 </Project>
