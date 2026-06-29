@@ -11,6 +11,7 @@
 #include "Qemu_Libretro_UWPMain.h"
 
 #include <string>
+#include <atomic>
 #include <cstdint>
 #include <vector>
 #include <map>
@@ -92,7 +93,9 @@ namespace Qemu_Libretro_UWP
 		void AppendError(const std::wstring& text);
 		void ToggleInputCapture();
 		void UpdateCaptureIndicators();
+		void ApplyMouseCaptureState();
 		void FocusEmulatorSurface();
+		void UpdateMouseButtonState(Windows::UI::Core::PointerEventArgs^ e);
 		void SendPointerToCore(Windows::UI::Core::PointerEventArgs^ e);
 		void RefreshCommandLinePreview();
 		void RefreshBootMediaState();
@@ -147,6 +150,7 @@ namespace Qemu_Libretro_UWP
 		void OnPointerPressed(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
 		void OnPointerMoved(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
 		void OnPointerReleased(Platform::Object^ sender, Windows::UI::Core::PointerEventArgs^ e);
+		void OnMouseMoved(Windows::Devices::Input::MouseDevice^ sender, Windows::Devices::Input::MouseEventArgs^ e);
 
 		// Resources used to render DirectX content behind the XAML page.
 		std::shared_ptr<DX::DeviceResources> m_deviceResources;
@@ -197,13 +201,13 @@ namespace Qemu_Libretro_UWP
 		bool m_inputCaptured;
 		bool m_ctrlDown;
 		bool m_altDown;
+		Windows::UI::Core::CoreCursor^ m_defaultPointerCursor;
+		bool m_windowPointerCaptured;
+		std::atomic<bool> m_mouseLeft;
+		std::atomic<bool> m_mouseRight;
+		std::atomic<bool> m_mouseMiddle;
 		double m_inputSurfaceWidth;
 		double m_inputSurfaceHeight;
-		double m_emulatorPointerX;
-		double m_emulatorPointerY;
-		double m_lastPhysicalPointerX;
-		double m_lastPhysicalPointerY;
-		bool m_havePhysicalPointerPosition;
 	};
 }
 

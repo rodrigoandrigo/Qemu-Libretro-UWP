@@ -39,6 +39,8 @@ LibretroHost::LibretroHost() :
 	m_frameDirty(false),
 	m_mouseX(0),
 	m_mouseY(0),
+	m_pointerX(0),
+	m_pointerY(0),
 	m_lastPointerX(0.0f),
 	m_lastPointerY(0.0f),
 	m_havePointerPosition(false),
@@ -375,18 +377,23 @@ void LibretroHost::SetKey(unsigned retroKey, bool pressed)
 void LibretroHost::SetPointer(float x, float y, bool left, bool right, bool middle)
 {
 	std::lock_guard<std::mutex> lock(m_inputMutex);
-	if (m_havePointerPosition)
-	{
-		int dx = static_cast<int>(std::lround(x - m_lastPointerX));
-		int dy = static_cast<int>(std::lround(y - m_lastPointerY));
-		int accumulatedX = static_cast<int>(m_mouseX) + dx;
-		int accumulatedY = static_cast<int>(m_mouseY) + dy;
-		m_mouseX = static_cast<int16_t>((std::max)(-32768, (std::min)(32767, accumulatedX)));
-		m_mouseY = static_cast<int16_t>((std::max)(-32768, (std::min)(32767, accumulatedY)));
-	}
+	m_pointerX = static_cast<int16_t>((std::max)(-32767, (std::min)(32767, static_cast<int>(std::lround(x)))));
+	m_pointerY = static_cast<int16_t>((std::max)(-32767, (std::min)(32767, static_cast<int>(std::lround(y)))));
 	m_lastPointerX = x;
 	m_lastPointerY = y;
 	m_havePointerPosition = true;
+	m_mouseLeft = left;
+	m_mouseRight = right;
+	m_mouseMiddle = middle;
+}
+
+void LibretroHost::AddMouseDelta(int deltaX, int deltaY, bool left, bool right, bool middle)
+{
+	std::lock_guard<std::mutex> lock(m_inputMutex);
+	int accumulatedX = static_cast<int>(m_mouseX) + deltaX;
+	int accumulatedY = static_cast<int>(m_mouseY) + deltaY;
+	m_mouseX = static_cast<int16_t>((std::max)(-32768, (std::min)(32767, accumulatedX)));
+	m_mouseY = static_cast<int16_t>((std::max)(-32768, (std::min)(32767, accumulatedY)));
 	m_mouseLeft = left;
 	m_mouseRight = right;
 	m_mouseMiddle = middle;
@@ -397,6 +404,8 @@ void LibretroHost::ClearPointer()
 	std::lock_guard<std::mutex> lock(m_inputMutex);
 	m_mouseX = 0;
 	m_mouseY = 0;
+	m_pointerX = 0;
+	m_pointerY = 0;
 	m_lastPointerX = 0.0f;
 	m_lastPointerY = 0.0f;
 	m_havePointerPosition = false;
@@ -418,6 +427,8 @@ void LibretroHost::ClearInput()
 	}
 	m_mouseX = 0;
 	m_mouseY = 0;
+	m_pointerX = 0;
+	m_pointerY = 0;
 	m_lastPointerX = 0.0f;
 	m_lastPointerY = 0.0f;
 	m_havePointerPosition = false;
@@ -696,6 +707,22 @@ int16_t LibretroHost::OnInputState(unsigned, unsigned device, unsigned, unsigned
 			return m_mouseRight ? 1 : 0;
 		case RETRO_DEVICE_ID_MOUSE_MIDDLE:
 			return m_mouseMiddle ? 1 : 0;
+		default:
+			return 0;
+		}
+	}
+	if (device == RETRO_DEVICE_POINTER)
+	{
+		switch (id)
+		{
+		case RETRO_DEVICE_ID_POINTER_X:
+			return m_pointerX;
+		case RETRO_DEVICE_ID_POINTER_Y:
+			return m_pointerY;
+		case RETRO_DEVICE_ID_POINTER_PRESSED:
+			return m_mouseLeft ? 1 : 0;
+		case RETRO_DEVICE_ID_POINTER_COUNT:
+			return 1;
 		default:
 			return 0;
 		}

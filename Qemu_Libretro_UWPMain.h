@@ -33,6 +33,7 @@ namespace Qemu_Libretro_UWP
 		void SetProgressCallback(std::function<void(const std::wstring&)> callback);
 		void SetKey(unsigned retroKey, bool pressed);
 		void SetPointer(float positionX, float positionY, bool left, bool right, bool middle);
+		void AddMouseDelta(int deltaX, int deltaY, bool left, bool right, bool middle);
 		void ClearPointer();
 		void ClearInput();
 		std::wstring StatusText() const;

@@ -159,6 +159,11 @@ void Qemu_Libretro_UWPMain::SetPointer(float positionX, float positionY, bool le
 	m_host.SetPointer(positionX, positionY, left, right, middle);
 }
 
+void Qemu_Libretro_UWPMain::AddMouseDelta(int deltaX, int deltaY, bool left, bool right, bool middle)
+{
+	m_host.AddMouseDelta(deltaX, deltaY, left, right, middle);
+}
+
 void Qemu_Libretro_UWPMain::ClearPointer()
 {
 	m_pointerPressed = false;

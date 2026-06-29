@@ -24,6 +24,7 @@ using namespace Platform;
 using namespace Windows::ApplicationModel;
 using namespace Windows::Foundation;
 using namespace Windows::Foundation::Collections;
+using namespace Windows::Devices::Input;
 using namespace Windows::Graphics::Display;
 using namespace Windows::Networking;
 using namespace Windows::Networking::Sockets;
@@ -811,20 +812,18 @@ DirectXPage::DirectXPage():
 	m_inputCaptured(true),
 	m_ctrlDown(false),
 	m_altDown(false),
+	m_defaultPointerCursor(nullptr),
+	m_windowPointerCaptured(false),
+	m_mouseLeft(false),
+	m_mouseRight(false),
+	m_mouseMiddle(false),
 	m_inputSurfaceWidth(1.0),
-	m_inputSurfaceHeight(1.0),
-	m_emulatorPointerX(0.0),
-	m_emulatorPointerY(0.0),
-	m_lastPhysicalPointerX(0.0),
-	m_lastPhysicalPointerY(0.0),
-	m_havePhysicalPointerPosition(false)
+	m_inputSurfaceHeight(1.0)
 {
 	InitializeComponent();
 	UpdateCaptureIndicators();
 	m_inputSurfaceWidth = (std::max)(1.0, swapChainPanel->ActualWidth);
 	m_inputSurfaceHeight = (std::max)(1.0, swapChainPanel->ActualHeight);
-	m_emulatorPointerX = m_inputSurfaceWidth * 0.5;
-	m_emulatorPointerY = m_inputSurfaceHeight * 0.5;
 
 	m_argumentsHelpHideTimer = ref new DispatcherTimer();
 	TimeSpan hideDelay;
@@ -857,6 +856,11 @@ DirectXPage::DirectXPage():
 
 	// Register event handlers for the page lifecycle.
 	CoreWindow^ window = Window::Current->CoreWindow;
+	m_defaultPointerCursor = window->PointerCursor;
+	if (m_defaultPointerCursor == nullptr)
+	{
+		m_defaultPointerCursor = ref new CoreCursor(CoreCursorType::Arrow, 0);
+	}
 
 	window->VisibilityChanged +=
 		ref new TypedEventHandler<CoreWindow^, VisibilityChangedEventArgs^>(this, &DirectXPage::OnVisibilityChanged);
@@ -864,6 +868,9 @@ DirectXPage::DirectXPage():
 		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(this, &DirectXPage::OnKeyDown);
 	window->KeyUp +=
 		ref new TypedEventHandler<CoreWindow^, KeyEventArgs^>(this, &DirectXPage::OnKeyUp);
+
+	MouseDevice::GetForCurrentView()->MouseMoved +=
+		ref new TypedEventHandler<MouseDevice^, MouseEventArgs^>(this, &DirectXPage::OnMouseMoved);
 
 	DisplayInformation^ currentDisplayInformation = DisplayInformation::GetForCurrentView();
 
@@ -920,6 +927,24 @@ DirectXPage::DirectXPage():
 
 DirectXPage::~DirectXPage()
 {
+	try
+	{
+		CoreWindow^ window = Window::Current->CoreWindow;
+		if (window != nullptr)
+		{
+			if (m_windowPointerCaptured)
+			{
+				window->ReleasePointerCapture();
+				m_windowPointerCaptured = false;
+			}
+			window->PointerCursor = m_defaultPointerCursor != nullptr
+				? m_defaultPointerCursor
+				: ref new CoreCursor(CoreCursorType::Arrow, 0);
+		}
+	}
+	catch (...)
+	{
+	}
 	StopAllMediaNbdServers();
 	if (m_bootMediaSizeTimer != nullptr)
 	{
@@ -964,6 +989,7 @@ void DirectXPage::OnVisibilityChanged(CoreWindow^ sender, VisibilityChangedEvent
 	{
 		m_main->StopRenderLoop();
 	}
+	UpdateCaptureIndicators();
 }
 
 // Manipuladores de eventos DisplayInformation.
@@ -1929,11 +1955,30 @@ void DirectXPage::OnKeyUp(CoreWindow^ sender, KeyEventArgs^ args)
 
 void DirectXPage::OnPointerPressed(Object^ sender, PointerEventArgs^ e)
 {
-	if (!m_isRunning || !m_inputCaptured)
+	if (!m_isRunning)
 	{
 		return;
 	}
 
+	if (!m_inputCaptured)
+	{
+		Dispatcher->RunAsync(CoreDispatcherPriority::High, ref new DispatchedHandler([this]()
+		{
+			m_inputCaptured = true;
+			m_mouseLeft = false;
+			m_mouseRight = false;
+			m_mouseMiddle = false;
+			if (m_main != nullptr)
+			{
+				m_main->ClearInput();
+			}
+			UpdateCaptureIndicators();
+			SetStatus(L"Input captured by the emulator. Ctrl+Alt+M releases mouse and keyboard.");
+		}));
+		return;
+	}
+
+	UpdateMouseButtonState(e);
 	SendPointerToCore(e);
 }
 
@@ -1944,6 +1989,7 @@ void DirectXPage::OnPointerMoved(Object^ sender, PointerEventArgs^ e)
 		return;
 	}
 
+	UpdateMouseButtonState(e);
 	SendPointerToCore(e);
 }
 
@@ -1954,7 +2000,31 @@ void DirectXPage::OnPointerReleased(Object^ sender, PointerEventArgs^ e)
 		return;
 	}
 
+	UpdateMouseButtonState(e);
 	SendPointerToCore(e);
+}
+
+void DirectXPage::OnMouseMoved(MouseDevice^ sender, MouseEventArgs^ e)
+{
+	(void)sender;
+	if (!m_isRunning || !m_inputCaptured || m_main == nullptr || e == nullptr)
+	{
+		return;
+	}
+
+	int deltaX = e->MouseDelta.X;
+	int deltaY = e->MouseDelta.Y;
+	if (deltaX == 0 && deltaY == 0)
+	{
+		return;
+	}
+
+	m_main->AddMouseDelta(
+		deltaX,
+		deltaY,
+		m_mouseLeft.load(),
+		m_mouseRight.load(),
+		m_mouseMiddle.load());
 }
 
 void DirectXPage::OnCompositionScaleChanged(SwapChainPanel^ sender, Object^ args)
@@ -1968,8 +2038,7 @@ void DirectXPage::OnSwapChainPanelSizeChanged(Object^ sender, SizeChangedEventAr
 {
 	m_inputSurfaceWidth = (std::max)(1.0, static_cast<double>(e->NewSize.Width));
 	m_inputSurfaceHeight = (std::max)(1.0, static_cast<double>(e->NewSize.Height));
-	m_emulatorPointerX = (std::max)(0.0, (std::min)(m_inputSurfaceWidth, m_emulatorPointerX));
-	m_emulatorPointerY = (std::max)(0.0, (std::min)(m_inputSurfaceHeight, m_emulatorPointerY));
+	ApplyMouseCaptureState();
 
 	critical_section::scoped_lock lock(m_main->GetCriticalSection());
 	m_deviceResources->SetLogicalSize(e->NewSize);
@@ -2103,13 +2172,14 @@ void DirectXPage::SetSelectorLoadProgress(double percent, const std::wstring& te
 void DirectXPage::ToggleInputCapture()
 {
 	m_inputCaptured = !m_inputCaptured;
-	m_main->ClearInput();
-	m_havePhysicalPointerPosition = false;
-	UpdateCaptureIndicators();
-	if (m_inputCaptured)
+	if (m_main != nullptr)
 	{
-		FocusEmulatorSurface();
+		m_main->ClearInput();
 	}
+	m_mouseLeft = false;
+	m_mouseRight = false;
+	m_mouseMiddle = false;
+	UpdateCaptureIndicators();
 	SetStatus(m_inputCaptured
 		? L"Input captured by the emulator. Ctrl+Alt+M releases mouse and keyboard."
 		: L"Input released to the interface. Ctrl+Alt+M captures mouse and keyboard.");
@@ -2141,6 +2211,56 @@ void DirectXPage::UpdateCaptureIndicators()
 	{
 		FocusEmulatorSurface();
 	}
+	ApplyMouseCaptureState();
+}
+
+void DirectXPage::ApplyMouseCaptureState()
+{
+	bool activeCapture = m_isRunning && m_inputCaptured && m_windowVisible;
+	try
+	{
+		CoreWindow^ window = Window::Current->CoreWindow;
+		if (window != nullptr)
+		{
+			if (activeCapture)
+			{
+				window->PointerCursor = nullptr;
+				if (!m_windowPointerCaptured)
+				{
+					window->SetPointerCapture();
+					m_windowPointerCaptured = true;
+				}
+			}
+			else
+			{
+				if (m_windowPointerCaptured)
+				{
+					window->ReleasePointerCapture();
+					m_windowPointerCaptured = false;
+				}
+				window->PointerCursor = m_defaultPointerCursor != nullptr
+					? m_defaultPointerCursor
+					: ref new CoreCursor(CoreCursorType::Arrow, 0);
+			}
+		}
+	}
+	catch (...)
+	{
+	}
+
+	if (activeCapture)
+	{
+		FocusEmulatorSurface();
+		return;
+	}
+
+	if (m_main != nullptr)
+	{
+		m_main->ClearPointer();
+	}
+	m_mouseLeft = false;
+	m_mouseRight = false;
+	m_mouseMiddle = false;
 }
 
 void DirectXPage::FocusEmulatorSurface()
@@ -2154,8 +2274,26 @@ void DirectXPage::FocusEmulatorSurface()
 	}
 }
 
+void DirectXPage::UpdateMouseButtonState(PointerEventArgs^ e)
+{
+	if (e == nullptr || e->CurrentPoint == nullptr)
+	{
+		return;
+	}
+
+	auto props = e->CurrentPoint->Properties;
+	m_mouseLeft.store(props->IsLeftButtonPressed);
+	m_mouseRight.store(props->IsRightButtonPressed);
+	m_mouseMiddle.store(props->IsMiddleButtonPressed);
+}
+
 void DirectXPage::SendPointerToCore(PointerEventArgs^ e)
 {
+	if (m_main == nullptr || e == nullptr || e->CurrentPoint == nullptr)
+	{
+		return;
+	}
+
 	auto point = e->CurrentPoint;
 	auto props = point->Properties;
 	double width = m_inputSurfaceWidth;
@@ -2169,22 +2307,11 @@ void DirectXPage::SendPointerToCore(PointerEventArgs^ e)
 	double physicalY = static_cast<double>(point->Position.Y);
 	double clampedX = (std::max)(0.0, (std::min)(width, physicalX));
 	double clampedY = (std::max)(0.0, (std::min)(height, physicalY));
-	if (m_havePhysicalPointerPosition)
-	{
-		m_emulatorPointerX = (std::max)(0.0, (std::min)(width, m_emulatorPointerX + physicalX - m_lastPhysicalPointerX));
-		m_emulatorPointerY = (std::max)(0.0, (std::min)(height, m_emulatorPointerY + physicalY - m_lastPhysicalPointerY));
-	}
-	else
-	{
-		m_emulatorPointerX = clampedX;
-		m_emulatorPointerY = clampedY;
-		m_havePhysicalPointerPosition = true;
-	}
-	m_lastPhysicalPointerX = physicalX;
-	m_lastPhysicalPointerY = physicalY;
+	double pointerX = ((clampedX / width) * 65534.0) - 32767.0;
+	double pointerY = ((clampedY / height) * 65534.0) - 32767.0;
 	m_main->SetPointer(
-		static_cast<float>(m_emulatorPointerX),
-		static_cast<float>(m_emulatorPointerY),
+		static_cast<float>(pointerX),
+		static_cast<float>(pointerY),
 		props->IsLeftButtonPressed,
 		props->IsRightButtonPressed,
 		props->IsMiddleButtonPressed);

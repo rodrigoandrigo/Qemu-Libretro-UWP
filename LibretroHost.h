@@ -38,6 +38,7 @@ namespace Qemu_Libretro_UWP
 		void SetProgressCallback(std::function<void(const std::wstring&)> callback);
 		void SetKey(unsigned retroKey, bool pressed);
 		void SetPointer(float x, float y, bool left, bool right, bool middle);
+		void AddMouseDelta(int deltaX, int deltaY, bool left, bool right, bool middle);
 		void ClearPointer();
 		void ClearInput();
 		LibretroFrameSnapshot CopyFrame(bool forcePixels = false);
@@ -94,6 +95,8 @@ namespace Qemu_Libretro_UWP
 		std::array<bool, 512> m_keys;
 		int16_t m_mouseX;
 		int16_t m_mouseY;
+		int16_t m_pointerX;
+		int16_t m_pointerY;
 		float m_lastPointerX;
 		float m_lastPointerY;
 		bool m_havePointerPosition;
